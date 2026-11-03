@@ -55,7 +55,13 @@ func Save(ctx context.Context, name string, content string, overwrite bool, sync
 		return
 	}
 
-	err = config.WriteFile(path, []byte(content), 0644)
+	// Full sync applies stream files in its preceding configuration batch.
+	// Only skip a replicated write with current bytes already proven applied;
+	// manual apply and staged/unknown state retain their reload behavior.
+	alreadyApplied := nodeauth.IsReplicated(ctx) && snapshot.IsApplied(path, []byte(content))
+	if !alreadyApplied {
+		err = config.WriteFile(path, []byte(content), 0644)
+	}
 	if err != nil {
 		return config.RollbackError(err, func() error {
 			return snapshot.Restore(path)
@@ -93,6 +99,8 @@ func Save(ctx context.Context, name string, content string, overwrite bool, sync
 	} else if remoteDeploy {
 		logger.Infof("Skipping Nginx test and reload after stream save: stream=%q reason=remote_deploy post_action=%q",
 			name, postAction)
+	} else if alreadyApplied {
+		logger.Infof("Skipping Nginx test and reload after stream save: stream=%q reason=already_applied", name)
 	} else {
 		// Test nginx configuration. A rejected configuration must not survive on
 		// disk: the running Nginx keeps its valid in-memory configuration, so the
@@ -116,6 +124,7 @@ func Save(ctx context.Context, name string, content string, overwrite bool, sync
 					return config.RestoreAndReload(path, snapshot)
 				})
 			}
+			config.RecordAppliedFile(path, []byte(content))
 			logger.Infof("Nginx reload after stream save succeeded: stream=%q", name)
 		} else {
 			logger.Infof("Skipping Nginx reload after stream save: stream=%q reason=post_action post_action=%q",

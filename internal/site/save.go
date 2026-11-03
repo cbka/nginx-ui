@@ -64,7 +64,13 @@ func Save(ctx context.Context, name string, content string, overwrite bool, name
 		return
 	}
 
-	err = writeConfigFile(path, []byte(content), 0644)
+	// A full cluster sync already applied these files in one config batch.
+	// Preserve metadata updates, but do not create one worker generation per
+	// identical replicated site. Manual apply and unproven/staged files reload.
+	alreadyApplied := nodeauth.IsReplicated(ctx) && snapshot.IsApplied(path, []byte(content))
+	if !alreadyApplied {
+		err = writeConfigFile(path, []byte(content), 0644)
+	}
 	if err != nil {
 		return rollbackError(err, func() error {
 			return snapshot.Restore(path)
@@ -95,6 +101,8 @@ func Save(ctx context.Context, name string, content string, overwrite bool, name
 	} else if remoteDeploy {
 		logger.Infof("Skipping Nginx test and reload after site save: site=%q reason=remote_deploy post_action=%q",
 			name, postAction)
+	} else if alreadyApplied {
+		logger.Infof("Skipping Nginx test and reload after site save: site=%q reason=already_applied", name)
 	} else {
 		// Test nginx configuration
 		logger.Infof("Testing Nginx configuration after site save: site=%q", name)
@@ -116,6 +124,7 @@ func Save(ctx context.Context, name string, content string, overwrite bool, name
 					return restoreConfigAndReload(path, snapshot)
 				})
 			}
+			config.RecordAppliedFile(path, []byte(content))
 			logger.Infof("Nginx reload after site save succeeded: site=%q", name)
 		} else {
 			logger.Infof("Skipping Nginx reload after site save: site=%q reason=post_action post_action=%q",

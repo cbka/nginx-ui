@@ -1,0 +1,5 @@
+/sources/
+/output/
+/*.tar.gz
+/dependencies-ready
+/__pycache__/
