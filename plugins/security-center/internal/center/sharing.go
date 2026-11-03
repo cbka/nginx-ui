@@ -151,7 +151,18 @@ func (s *Service) Sharing() SharingStatus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v := SharingStatus{Message: "Community signal sharing is unknown; no engine configuration integration is configured"}
-	if s.crowdsec() != nil || s.Config.SharingConfigPath == "" {
+	if s.crowdsec() != nil {
+		return v
+	}
+	if s.remoteControlConfigured() {
+		status, err := s.remoteSharing(context.Background(), nil)
+		if err != nil {
+			v.Message = "Community signal sharing is unknown: central engine control is unavailable"
+			return v
+		}
+		return status
+	}
+	if s.Config.SharingConfigPath == "" {
 		return v
 	}
 	_, _, _, enabled, err := s.sharingDocument()
@@ -170,6 +181,12 @@ func (s *Service) Sharing() SharingStatus {
 }
 func (s *Service) SetSharing(ctx context.Context, enabled bool) error {
 	if err := s.crowdsec(); err != nil {
+		return err
+	}
+	if s.remoteControlConfigured() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		_, err := s.remoteSharing(ctx, &enabled)
 		return err
 	}
 	if !filepath.IsAbs(s.Config.SharingConfigPath) || !filepath.IsAbs(s.Config.SharingValidatePath) || !filepath.IsAbs(s.Config.CrowdSecReloadPath) {

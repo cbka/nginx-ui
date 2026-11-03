@@ -3,6 +3,7 @@ package security_center
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +21,21 @@ func siteService(t *testing.T) *Service {
 		}
 	}
 	s.Run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
-		return []byte("# configuration file /etc/nginx/nginx.conf:\nevents {}\nhttp {}\n"), nil
+		dump := fmt.Sprintf("# configuration file /etc/nginx/nginx.conf:\nevents {}\nhttp { include %s/*.conf; }\n", root)
+		for _, name := range []string{"a.conf", "b.conf"} {
+			path, _ := s.sitePath(name)
+			body, _ := os.ReadFile(path)
+			dump += fmt.Sprintf("# configuration file %s:\n%s\n", path, body)
+			_, _, snippet := s.sitePaths(name)
+			if strings.Contains(string(body), snippet) {
+				content, err := os.ReadFile(snippet)
+				if err != nil {
+					return nil, err
+				}
+				dump += fmt.Sprintf("# configuration file %s:\n%s\n", snippet, content)
+			}
+		}
+		return []byte(dump), nil
 	}
 	return s
 }

@@ -290,39 +290,6 @@ func configureSite(content, snippet string) (string, error) {
 	return dumper.DumpConfig(parsed, dumper.IndentedStyle), nil
 }
 
-// checkTopology rejects unowned hooks/rules and all parent-level CRS loading.
-// Nginx -T labels each source file, so only our marked per-site snippets may
-// contain directives that would otherwise collide with inherited security.
-func (s *Service) checkTopology(dump []byte) error {
-	sections := strings.Split(string(dump), "# configuration file ")
-	if len(sections) < 2 {
-		return errors.New("Nginx configuration dump is incomplete")
-	}
-	for _, section := range sections {
-		line, body, ok := strings.Cut(section, "\n")
-		if !ok {
-			continue
-		}
-		path := strings.TrimSuffix(strings.TrimSpace(line), ":")
-		managed := strings.HasPrefix(path, filepath.Join(filepath.Dir(s.Config.ModSecurityPath), "sites")+string(os.PathSeparator)) && strings.HasSuffix(path, ".nginx.conf")
-		if managed {
-			b, err := os.ReadFile(path)
-			if err != nil || !strings.HasPrefix(string(b), snippetMarker) {
-				return errors.New("unowned security snippet encountered")
-			}
-			continue
-		}
-		parsed, err := parser.NewStringParser(body, parser.WithSkipValidDirectivesErr()).Parse()
-		if err != nil {
-			return errors.New("cannot safely inspect existing Nginx security topology")
-		}
-		if err = rejectSensitive(parsed.Block); err != nil {
-			return errors.New("unowned global/site ModSecurity or Lua access hook conflicts; remove parent CRS loading or integrate existing hooks first")
-		}
-	}
-	return nil
-}
-
 type fileChange struct {
 	path string
 	data []byte
@@ -501,7 +468,7 @@ func (s *Service) ApplySite(ctx context.Context, name string, p SitePolicy) (Sit
 	if err != nil {
 		return SiteResponse{}, err
 	}
-	if err = s.checkTopology(dump); err != nil {
+	if err = s.checkTopology(dump, name); err != nil {
 		return SiteResponse{}, err
 	}
 	changes, err := s.stateChanges(global, state)

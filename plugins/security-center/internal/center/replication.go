@@ -117,7 +117,7 @@ func (s *Service) ApplyReplica(ctx context.Context, p ReplicaPayload, controller
 	if err != nil {
 		return false, err
 	}
-	if err = s.checkTopology(dump); err != nil {
+	if err = s.checkTopology(dump, p.Name); err != nil {
 		return false, err
 	}
 	if err = s.applyFiles(ctx, changes); err != nil {
