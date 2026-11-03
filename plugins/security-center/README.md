@@ -74,3 +74,25 @@ The plugin settings drawer links to Security Center. Missing engines and central
 logging are shown explicitly instead of issuing requests to disabled APIs.
 `events_configured` only indicates a configured Loki endpoint, not reachability
 or proof that events are being collected.
+
+### Source IP exceptions
+
+Security Center provides separate ModSecurity and CrowdSec IP/CIDR lists in
+Global defaults and each website policy. Global and website entries are additive;
+a website cannot negate a global exception. Up to 400 effective entries per
+engine are accepted. IPv4/IPv6 addresses and networks are validated server-side.
+Empty lists preserve the existing protection.
+
+ModSecurity exceptions bypass the entire inspection for that request, including
+custom path blocks. CrowdSec exceptions bypass the local Nginx bouncer only;
+they do not delete central decisions, stop detection, or change community sharing.
+Both use Nginx's resolved client address, never a request-supplied forwarding
+header. If a NAT or proxy address represents many visitors, exempting it also
+exempts those visitors. Public source IPs must first be preserved or established
+through explicitly trusted proxy configuration.
+
+The CrowdSec feature requires the matching runtime's `nginx_ui_ip_allowlist.lua`;
+update the runtime before installing the plugin. Saved site policies and their
+source defaults carry both lists through normal peer synchronization. Upgrading
+with empty lists preserves legacy replica hashes. No addresses are exempted by
+installing the update.
