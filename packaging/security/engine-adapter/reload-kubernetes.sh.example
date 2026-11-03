@@ -1,0 +1,8 @@
+#!/bin/sh
+# Fixed engine rollout adapter. No user-supplied arguments or image changes.
+# Readiness must genuinely check the engine. All replicas need the same edited config.
+set -eu
+/usr/local/bin/kubectl --kubeconfig /etc/nginx-ui/security-engine.kubeconfig \
+  --namespace crowdsec rollout restart deployment/crowdsec
+exec /usr/local/bin/kubectl --kubeconfig /etc/nginx-ui/security-engine.kubeconfig \
+  --namespace crowdsec rollout status deployment/crowdsec --timeout=15s

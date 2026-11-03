@@ -24,3 +24,9 @@ cache
 
 # language
 src/language/**/*.mo
+
+# Local interactive review fixture; never part of the production application
+.preview/
+preview-dist/
+security-preview.html
+vite.preview.config.ts

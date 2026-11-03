@@ -1,0 +1,452 @@
+<script setup lang="ts">
+import type { Decision, Scenario } from './normalize'
+import type { ModSecurityConfig, SecurityEvent, SecuritySite, SecurityStatus } from '@/api/security_center'
+import { ReloadOutlined } from '@antdv-next/icons'
+import security from '@/api/security_center'
+import { getErrorMessage } from '@/lib/http'
+import { useSettingsStore } from '@/pinia'
+import CommunitySharing from './CommunitySharing.vue'
+import { canManageSecurity, normalizeDecisions, normalizeScenarios, parseExcludedRules } from './normalize'
+import SecurityEvents from './SecurityEvents.vue'
+import SiteProtection from './SiteProtection.vue'
+
+const { message, modal } = App.useApp()
+const settings = useSettingsStore()
+const initialNodeId = settings.node.id
+let mounted = true
+onBeforeUnmount(() => {
+  mounted = false
+})
+function assertCurrentNode() {
+  if (!mounted || !canManageSecurity(settings.node.id) || settings.node.id !== initialNodeId)
+    throw new Error($gettext('Select the local controller and reopen Security Center before making changes.'))
+}
+const status = ref<SecurityStatus>()
+const loading = ref(false)
+const busy = ref(false)
+const error = ref('')
+const crowdsecError = ref('')
+const wafError = ref('')
+const decisions = ref<Decision[]>([])
+const scenarios = ref<Scenario[]>([])
+const waf = ref<ModSecurityConfig>()
+const savedWaf = ref('')
+const exclusions = ref('')
+const applied = ref<string>()
+const ban = reactive({ ip: '', duration: '4h', reason: '' })
+const scenarioName = ref('')
+const search = ref('')
+const activeTab = ref('crowdsec')
+const eventDraft = ref<{ site: string, event: SecurityEvent, action: 'exception' | 'block', revision: number }>()
+const sites = ref<SecuritySite[]>([])
+const siteError = ref('')
+const selectedSite = ref('')
+watch(selectedSite, () => {
+  eventDraft.value = undefined
+}, { flush: 'sync' })
+const siteDirty = ref(false)
+const siteBusy = ref(false)
+const scopeOptions = computed(() => [
+  {
+    value: '',
+    label: $gettext('Global defaults'),
+  },
+  ...sites.value.map(site => ({
+    value: site.name,
+    label: site.server_names.length
+      ? `${site.name} — ${site.server_names.join(', ')}`
+      : site.name,
+  })),
+])
+const visibleDecisions = computed(() => decisions.value.filter(item =>
+  `${item.value} ${item.reason} ${item.origin}`.toLowerCase().includes(search.value.toLowerCase()),
+))
+const excludedIds = computed(() => parseExcludedRules(exclusions.value))
+const wafPayload = computed(() => waf.value && excludedIds.value
+  ? { ...waf.value, excluded_rule_ids: excludedIds.value }
+  : undefined)
+const wafDirty = computed(() => JSON.stringify(wafPayload.value) !== savedWaf.value)
+const unsaved = computed(() => selectedSite.value
+  ? siteDirty.value
+  : wafDirty.value && !!waf.value)
+const wafValid = computed(() => {
+  const config = wafPayload.value
+  return !!config && [1, 2, 3, 4].includes(config.paranoia_level)
+    && Number.isInteger(config.inbound_threshold) && config.inbound_threshold >= 1 && config.inbound_threshold <= 1000
+    && Number.isInteger(config.outbound_threshold) && config.outbound_threshold >= 1 && config.outbound_threshold <= 1000
+})
+const canCrowdsec = computed(() => !!status.value?.enabled && !!status.value?.crowdsec_enabled)
+
+async function loadCrowdsec() {
+  crowdsecError.value = ''
+  const results = await Promise.allSettled([
+    security.decisions(),
+    security.scenarios(),
+  ])
+  if (results[0].status === 'fulfilled')
+    decisions.value = normalizeDecisions(results[0].value.items)
+  else
+    decisions.value = []
+  if (results[1].status === 'fulfilled')
+    scenarios.value = normalizeScenarios(results[1].value.items)
+  else
+    scenarios.value = []
+  crowdsecError.value = results.flatMap(result => result.status === 'rejected'
+    ? [
+        getErrorMessage(result.reason),
+      ]
+    : []).join(' · ')
+}
+
+async function loadWaf() {
+  wafError.value = ''
+  try {
+    waf.value = await security.modsecurity()
+    exclusions.value = (waf.value.excluded_rule_ids ?? []).join(', ')
+    savedWaf.value = JSON.stringify(wafPayload.value)
+  }
+  catch (e) {
+    waf.value = undefined
+    wafError.value = getErrorMessage(e)
+  }
+}
+
+async function loadSites() {
+  siteError.value = ''
+  try {
+    sites.value = (await security.sites()).items ?? []
+  }
+  catch (e) {
+    siteError.value = getErrorMessage(e)
+  }
+}
+
+async function refresh() {
+  if (!canManageSecurity(settings.node.id))
+    return
+  loading.value = true
+  error.value = ''
+  applied.value = undefined
+  try {
+    status.value = await security.status()
+    await Promise.all([
+      status.value.enabled
+        ? loadSites()
+        : Promise.resolve(),
+      canCrowdsec.value
+        ? loadCrowdsec()
+        : Promise.resolve(),
+      status.value.enabled && status.value.modsecurity_enabled
+        ? loadWaf()
+        : Promise.resolve(),
+    ])
+  }
+  catch (e) {
+    status.value = undefined
+    error.value = getErrorMessage(e)
+  }
+  finally {
+    loading.value = false
+  }
+}
+
+async function mutate(action: () => Promise<unknown>, reload: () => Promise<void>) {
+  busy.value = true
+  try {
+    assertCurrentNode()
+    await action()
+    await reload()
+    message.success($gettext('Change completed.'))
+  }
+  catch (e) {
+    const detail = getErrorMessage(e)
+    if (detail)
+      message.error(detail)
+    throw e
+  }
+  finally {
+    busy.value = false
+  }
+}
+
+function addBan() {
+  modal.confirm({
+    title: $gettext('Block this IP address?'),
+    content: $gettext('This may immediately interrupt access, including your own connection. IP: %{ip}', { ip: ban.ip }),
+    okText: $gettext('Block IP'),
+    okButtonProps: { danger: true },
+    async onOk() {
+      await mutate(() => security.addDecision({
+        ip: ban.ip.trim(),
+        duration: ban.duration.trim(),
+        reason: ban.reason.trim(),
+      }), loadCrowdsec)
+      ban.ip = ''
+      ban.reason = ''
+    },
+  })
+}
+
+function removeBan(item: Decision) {
+  modal.confirm({
+    title: $gettext('Remove this decision?'),
+    content: $gettext('The decision for %{ip} will be removed. Other decisions may still apply, and CrowdSec can create new decisions.', { ip: item.value }),
+    okText: $gettext('Remove decision'),
+    okButtonProps: { danger: true },
+    onOk: () => mutate(() => security.deleteDecision(item.id), loadCrowdsec),
+  })
+}
+
+function changeScenario(name: string, action: 'install' | 'remove') {
+  modal.confirm({
+    title: action === 'remove'
+      ? $gettext('Remove scenario?')
+      : $gettext('Install scenario?'),
+    content: $gettext('Scenario: %{name}. CrowdSec will reload its configuration. Removing a scenario disables its future detections.', { name }),
+    okText: action === 'remove'
+      ? $gettext('Remove')
+      : $gettext('Install'),
+    okButtonProps: { danger: action === 'remove' },
+    async onOk() {
+      await mutate(() => security.changeScenario(name.trim(), action), loadCrowdsec)
+      scenarioName.value = ''
+    },
+  })
+}
+
+function saveWaf() {
+  if (!wafPayload.value || !wafValid.value)
+    return
+  const payload = {
+    ...wafPayload.value,
+    excluded_rule_ids: [...wafPayload.value.excluded_rule_ids],
+  }
+  modal.confirm({
+    title: $gettext('Apply WAF configuration?'),
+    content: $gettext('Nginx configuration will be checked and reloaded. Off disables inspection; DetectionOnly records matches without blocking. Excluded rule IDs no longer protect requests. The CrowdSec default applies to websites that inherit it.'),
+    okText: $gettext('Validate and apply'),
+    okButtonProps: { danger: payload.mode !== 'On' || !payload.crowdsec_enabled || payload.excluded_rule_ids.length > 0 },
+    async onOk() {
+      busy.value = true
+      applied.value = undefined
+      try {
+        assertCurrentNode()
+        const result = await security.saveModsecurity(payload)
+        await loadWaf()
+        applied.value = result.applied === true
+          ? $gettext('Global defaults validated; Nginx reload requested locally. Synchronize each affected website to update its configured peers. Verify protection with traffic.')
+          : $gettext('Configuration saved. Runtime application has not been confirmed.')
+      }
+      catch (e) {
+        wafError.value = getErrorMessage(e)
+        throw e
+      }
+      finally {
+        busy.value = false
+      }
+    },
+  })
+}
+
+function draftFromEvent(event: SecurityEvent, action: 'exception' | 'block') {
+  if (unsaved.value || busy.value || siteBusy.value) {
+    message.warning($gettext('Apply or discard current changes before preparing an event-based rule.'))
+    return
+  }
+  if (!sites.value.some(site => site.name === event.vhost)) {
+    message.warning($gettext('This event has no known website configuration. Select a verified website before creating rules.'))
+    return
+  }
+  selectedSite.value = event.vhost
+  eventDraft.value = {
+    site: event.vhost,
+    event,
+    action,
+    revision: Date.now(),
+  }
+  activeTab.value = 'modsecurity'
+}
+
+function prepareEventBan(event: SecurityEvent) {
+  if (!event.client_ip)
+    return
+  ban.ip = event.client_ip
+  ban.reason = `${event.scenario || event.message} (${event.vhost})`.slice(0, 200)
+  activeTab.value = 'crowdsec'
+  message.info($gettext('Global ban draft prepared. Check the IP, duration and reason before submitting; this can affect other websites.'))
+}
+
+onMounted(refresh)
+</script>
+
+<template>
+  <ACard :title="$gettext('Security Center')" class="security-center">
+    <template #extra>
+      <AButton :loading="loading" :disabled="!canManageSecurity(settings.node.id) || busy || siteBusy || unsaved" @click="refresh">
+        <template #icon>
+          <ReloadOutlined />
+        </template>
+        {{ $gettext('Refresh') }}
+      </AButton>
+    </template>
+    <p class="muted">
+      {{ $gettext('Manage CrowdSec decisions and OWASP CRS protection on the local controller. Edits apply locally; synchronize saved website policies to configured peers explicitly. Configured does not mean every website is protected.') }}
+    </p>
+    <AAlert v-if="!canManageSecurity(settings.node.id)" type="info" show-icon :message="$gettext('Security Center manages the local controller only. Select the local node to view or change its security settings.')" />
+    <AAlert v-if="error" type="error" show-icon :message="error" />
+    <ASpin :spinning="loading">
+      <AAlert v-if="status && !status.enabled" type="info" show-icon :message="$gettext('Security Center is not enabled on this node. Configure the server integration first.')" />
+      <ATabs v-if="status?.enabled" v-model:active-key="activeTab">
+        <ATabPane key="events" :tab="$gettext('Cluster events')">
+          <SecurityEvents :sites="sites" @exclude="draftFromEvent($event, 'exception')" @block="draftFromEvent($event, 'block')" @ban="prepareEventBan" />
+        </ATabPane>
+        <ATabPane key="crowdsec" :tab="$gettext('CrowdSec')">
+          <AAlert v-if="!canCrowdsec" type="info" show-icon :message="$gettext('CrowdSec is not configured on this node.')" />
+          <template v-else>
+            <AAlert v-if="crowdsecError" type="error" show-icon :message="crowdsecError" class="section-gap" />
+            <CommunitySharing />
+            <h3>{{ $gettext('Global active decisions') }}</h3>
+            <p class="muted">
+              {{ $gettext('Up to 100 local alerts are shown. Central API and simulated decisions are excluded. This is not a complete blocklist.') }}
+            </p>
+            <AInput v-model:value="search" :placeholder="$gettext('Filter by IP, reason or origin')" :aria-label="$gettext('Filter decisions')" allow-clear class="section-gap" />
+            <div class="table-scroll">
+              <table class="security-table decision-table">
+                <thead><tr><th>{{ $gettext('IP / value') }}</th><th>{{ $gettext('Type / scope') }}</th><th>{{ $gettext('Reason') }}</th><th>{{ $gettext('Origin') }}</th><th>{{ $gettext('Remaining') }}</th><th>{{ $gettext('Actions') }}</th></tr></thead>
+                <tbody>
+                  <tr v-for="item in visibleDecisions" :key="item.id">
+                    <td><code>{{ item.value }}</code></td><td>{{ item.type }} / {{ item.scope }}</td><td>{{ item.reason }}</td><td>{{ item.origin }}</td><td>{{ item.duration }}</td>
+                    <td>
+                      <AButton danger size="small" :disabled="busy || loading" @click="removeBan(item)">
+                        {{ $gettext('Remove') }}
+                      </AButton>
+                    </td>
+                  </tr>
+                  <tr v-if="!visibleDecisions.length">
+                    <td colspan="6">
+                      {{ crowdsecError ? $gettext('Decision list unavailable or incomplete.') : $gettext('No matching decisions.') }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3>{{ $gettext('Block an IP address') }}</h3>
+            <AForm layout="vertical" @finish="addBan">
+              <div class="form-grid">
+                <AFormItem :label="$gettext('IP address')">
+                  <AInput v-model:value="ban.ip" placeholder="192.0.2.10" :maxlength="45" />
+                </AFormItem>
+                <AFormItem :label="$gettext('Duration')">
+                  <AInput v-model:value="ban.duration" placeholder="4h" :maxlength="20" />
+                </AFormItem>
+                <AFormItem :label="$gettext('Reason')">
+                  <AInput v-model:value="ban.reason" :maxlength="200" />
+                </AFormItem>
+              </div>
+              <AButton html-type="submit" danger :disabled="busy || loading || !ban.ip.trim() || !ban.duration.trim() || !ban.reason.trim()">
+                {{ $gettext('Block IP') }}
+              </AButton>
+            </AForm>
+            <h3>{{ $gettext('Global detection scenarios') }}</h3>
+            <p class="muted">
+              {{ $gettext('Install scenarios by their exact CrowdSec Hub name. Rule source files and credentials are not edited here.') }}
+            </p>
+            <AAlert v-if="!status.scenario_changes_enabled" type="info" show-icon :message="$gettext('Scenario changes are unavailable until a CrowdSec reload command is configured.')" class="section-gap" />
+            <div class="inline-form section-gap">
+              <AInput v-model:value="scenarioName" placeholder="crowdsecurity/ssh-bf" :aria-label="$gettext('Scenario name')" />
+              <AButton :disabled="busy || loading || !status.scenario_changes_enabled || !scenarioName.trim()" @click="changeScenario(scenarioName, 'install')">
+                {{ $gettext('Install') }}
+              </AButton>
+            </div>
+            <div class="table-scroll">
+              <table class="security-table">
+                <thead><tr><th>{{ $gettext('Name') }}</th><th>{{ $gettext('Status') }}</th><th>{{ $gettext('Version') }}</th><th>{{ $gettext('Actions') }}</th></tr></thead>
+                <tbody>
+                  <tr v-for="item in scenarios" :key="item.name">
+                    <td>{{ item.name }}</td><td>{{ item.status || (item.installed ? $gettext('Installed') : $gettext('Available')) }}</td><td>{{ item.version }}</td>
+                    <td>
+                      <AButton :danger="item.installed" size="small" :disabled="busy || loading || !status.scenario_changes_enabled" @click="changeScenario(item.name, item.installed ? 'remove' : 'install')">
+                        {{ item.installed ? $gettext('Remove') : $gettext('Install') }}
+                      </AButton>
+                    </td>
+                  </tr>
+                  <tr v-if="!scenarios.length">
+                    <td colspan="4">
+                      {{ crowdsecError ? $gettext('Scenario list unavailable or incomplete.') : $gettext('No scenarios returned.') }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
+        </ATabPane>
+        <ATabPane key="modsecurity" :tab="$gettext('WAF & website protection')">
+          <AFormItem :label="$gettext('Configuration scope')">
+            <ASelect v-model:value="selectedSite" :options="scopeOptions" show-search option-filter-prop="label" :disabled="busy || loading || siteBusy || unsaved" />
+          </AFormItem>
+          <p v-if="unsaved" class="muted">
+            {{ $gettext('Apply or discard changes before switching scope.') }}
+          </p>
+          <AAlert v-if="siteError" type="warning" show-icon :message="siteError" class="section-gap" />
+          <SiteProtection v-if="selectedSite" :key="`${selectedSite}:${eventDraft?.revision ?? 0}`" :name="selectedSite" :draft="eventDraft?.site === selectedSite ? eventDraft : undefined" @busy="siteBusy = $event" @dirty="siteDirty = $event" />
+          <template v-else>
+            <AAlert v-if="!status.modsecurity_enabled" type="info" show-icon :message="$gettext('ModSecurity is not configured on this node.')" />
+            <template v-else>
+              <AAlert v-if="wafError" type="error" show-icon :message="wafError" class="section-gap" />
+              <AAlert v-if="applied" type="warning" show-icon :message="applied" class="section-gap" />
+              <AForm v-if="waf" layout="vertical" @finish="saveWaf">
+                <AAlert type="info" show-icon :message="$gettext('These are configured settings. Protection also requires the ModSecurity connector and CRS includes to be enabled in each relevant website.')" class="section-gap" />
+                <AFormItem :label="$gettext('Global CrowdSec enforcement default')" :help="$gettext('Applies to managed websites that inherit the global value. This does not start or stop the CrowdSec engine.')">
+                  <ASwitch v-model:checked="waf.crowdsec_enabled" />
+                </AFormItem>
+                <div class="form-grid">
+                  <AFormItem :label="$gettext('Inspection mode')">
+                    <ASelect v-model:value="waf.mode" :options="[{ value: 'DetectionOnly', label: $gettext('Detection only — log without blocking') }, { value: 'On', label: $gettext('On — inspect and block') }, { value: 'Off', label: $gettext('Off — no inspection') }]" />
+                  </AFormItem>
+                  <AFormItem :label="$gettext('OWASP paranoia level')">
+                    <ASelect v-model:value="waf.paranoia_level" :options="[1, 2, 3, 4].map(value => ({ value, label: String(value) }))" />
+                  </AFormItem>
+                  <AFormItem :label="$gettext('Inbound anomaly threshold')">
+                    <AInputNumber v-model:value="waf.inbound_threshold" :min="1" :max="1000" :precision="0" />
+                  </AFormItem>
+                  <AFormItem :label="$gettext('Outbound anomaly threshold')">
+                    <AInputNumber v-model:value="waf.outbound_threshold" :min="1" :max="1000" :precision="0" />
+                  </AFormItem>
+                </div>
+                <p class="muted">
+                  {{ $gettext('Higher paranoia levels enable stricter rules. Higher anomaly thresholds allow more matches before blocking.') }}
+                </p>
+                <AFormItem :label="$gettext('Excluded rule IDs')" :validate-status="excludedIds === undefined ? 'error' : undefined" :help="excludedIds === undefined ? $gettext('Use up to 200 OWASP CRS rule IDs (900000–999999), separated by commas or spaces.') : $gettext('Global exclusions weaken protection for every website using this configuration.')">
+                  <ATextarea v-model:value="exclusions" :rows="3" placeholder="920350, 942100" />
+                </AFormItem>
+                <AButton type="primary" html-type="submit" :loading="busy" :disabled="loading || !wafValid">
+                  {{ $gettext('Validate and apply') }}
+                </AButton>
+                <AButton :disabled="busy || loading || !wafDirty" class="unsaved" @click="loadWaf">
+                  {{ $gettext('Discard changes') }}
+                </AButton>
+                <span v-if="wafDirty" class="unsaved">{{ $gettext('Unsaved changes') }}</span>
+              </AForm>
+            </template>
+          </template>
+        </ATabPane>
+      </ATabs>
+    </ASpin>
+  </ACard>
+</template>
+
+<style lang="less" scoped>
+.security-center { min-width: 0; }
+.muted { color: var(--ant-color-text-secondary); }
+.section-gap { margin-bottom: 16px; }
+h3 { margin-top: 24px; }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 0 16px; }
+.inline-form { display: flex; gap: 8px; max-width: 600px; }
+.table-scroll { overflow-x: auto; max-width: 100%; }
+.security-table { width: 100%; border-collapse: collapse; text-align: left; }
+.security-table th, .security-table td { padding: 12px; border-bottom: 1px solid var(--ant-color-border-secondary); vertical-align: top; overflow-wrap: anywhere; }
+.decision-table { min-width: 710px; }
+.decision-table td:nth-child(1), .decision-table td:nth-child(2), .decision-table td:nth-child(4), .decision-table td:nth-child(5), .decision-table td:nth-child(6) { white-space: nowrap; overflow-wrap: normal; }
+.security-table th { color: var(--ant-color-text-secondary); font-weight: 500; }
+.unsaved { margin-left: 12px; color: var(--ant-color-warning); }
+</style>

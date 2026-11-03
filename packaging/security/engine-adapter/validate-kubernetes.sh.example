@@ -1,0 +1,7 @@
+#!/bin/sh
+# Install as a root-owned executable only after reviewing this fixed deployment.
+# The engine must mount the SAME persisted configuration edited by Security Center.
+set -eu
+exec /usr/local/bin/kubectl --kubeconfig /etc/nginx-ui/security-engine.kubeconfig \
+  --namespace crowdsec exec deployment/crowdsec --container crowdsec -- \
+  /usr/bin/crowdsec -c /etc/crowdsec/config.yaml -t

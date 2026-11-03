@@ -1,0 +1,6 @@
+# Merge these fields into the engine's existing config.yaml.local BEFORE startup.
+# Do not replace an existing overlay: unrelated settings and credentials must survive.
+api:
+  server:
+    online_client:
+      sharing: false

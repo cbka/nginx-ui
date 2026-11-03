@@ -1,0 +1,30 @@
+// Merge into the existing per-peer Alloy configuration; reuse loki.write.nginx.
+// Input MUST be produced by audit_normalizer.py, never point this at raw audit logs.
+loki.source.file "nginx_security" {
+  targets = [{
+    __path__ = "/var/log/nginx/security-events.jsonl",
+    job = "nginx-security",
+    node = sys.env("NODE_NAME"),
+    pod = sys.env("POD_NAME"),
+    namespace = sys.env("POD_NAMESPACE"),
+  }]
+  forward_to = [loki.process.nginx_security.receiver]
+  tail_from_end = false
+  file_match {
+    enabled = true
+    sync_period = "1s"
+  }
+}
+loki.process "nginx_security" {
+  forward_to = [loki.write.nginx.receiver]
+  stage.json {
+    expressions = { event_time = "event_time" }
+  }
+  stage.timestamp {
+    source = "event_time"
+    format = "RFC3339Nano"
+    action_on_failure = "skip"
+  }
+  // Do not turn IPs, URIs, transaction IDs or event IDs into Loki labels.
+  stage.label_drop { values = ["filename"] }
+}

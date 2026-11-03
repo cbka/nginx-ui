@@ -1,0 +1,22 @@
+# The reader opens output per batch and handles source rename-rotation by inode.
+# Keep numeric uncompressed raw rotations until the reader has drained them.
+/var/log/nginx/security-events.jsonl {
+    daily
+    maxsize 50M
+    rotate 14
+    missingok
+    notifempty
+    create 0640 root root
+}
+/var/log/nginx/modsecurity/*.json {
+    daily
+    maxsize 50M
+    rotate 3
+    missingok
+    notifempty
+    create 0640 root root
+    sharedscripts
+    postrotate
+        /usr/sbin/nginx -t && /usr/sbin/nginx -s reload
+    endscript
+}
