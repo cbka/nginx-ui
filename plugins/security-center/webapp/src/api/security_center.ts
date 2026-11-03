@@ -25,6 +25,8 @@ export interface ModSecurityConfig {
   inbound_threshold: number
   outbound_threshold: number
   excluded_rule_ids: number[]
+  modsecurity_allowlist?: string[]
+  crowdsec_allowlist?: string[]
 }
 
 export interface SecuritySite {
@@ -47,6 +49,8 @@ export interface SiteSecurityPolicy {
   inbound_threshold: number | null
   outbound_threshold: number | null
   excluded_rule_ids: number[]
+  modsecurity_allowlist?: string[]
+  crowdsec_allowlist?: string[]
 }
 
 export interface SecurityTemplate {

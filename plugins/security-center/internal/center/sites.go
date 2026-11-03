@@ -27,14 +27,16 @@ type RuleException struct {
 	Parameter string `json:"parameter,omitempty"`
 }
 type SitePolicy struct {
-	Exceptions        []RuleException `json:"exceptions"`
-	BlockedPaths      []string        `json:"blocked_paths"`
-	ModSecurity       string          `json:"modsecurity"`
-	CrowdSec          string          `json:"crowdsec"`
-	ParanoiaLevel     *int            `json:"paranoia_level"`
-	InboundThreshold  *int            `json:"inbound_threshold"`
-	OutboundThreshold *int            `json:"outbound_threshold"`
-	ExcludedRuleIDs   []int           `json:"excluded_rule_ids"`
+	ModSecurityAllowlist []string        `json:"modsecurity_allowlist"`
+	CrowdSecAllowlist    []string        `json:"crowdsec_allowlist"`
+	Exceptions           []RuleException `json:"exceptions"`
+	BlockedPaths         []string        `json:"blocked_paths"`
+	ModSecurity          string          `json:"modsecurity"`
+	CrowdSec             string          `json:"crowdsec"`
+	ParanoiaLevel        *int            `json:"paranoia_level"`
+	InboundThreshold     *int            `json:"inbound_threshold"`
+	OutboundThreshold    *int            `json:"outbound_threshold"`
+	ExcludedRuleIDs      []int           `json:"excluded_rule_ids"`
 }
 type SiteState struct {
 	Revision       int64      `json:"revision,string"`
@@ -117,6 +119,13 @@ func effectivePolicy(global WAFConfig, p SitePolicy) (EffectivePolicy, error) {
 		return EffectivePolicy{}, err
 	}
 	c := global
+	var err error
+	if c.ModSecurityAllowlist, err = mergeIPAllowlist(global.ModSecurityAllowlist, p.ModSecurityAllowlist); err != nil {
+		return EffectivePolicy{}, err
+	}
+	if c.CrowdSecAllowlist, err = mergeIPAllowlist(global.CrowdSecAllowlist, p.CrowdSecAllowlist); err != nil {
+		return EffectivePolicy{}, err
+	}
 	if p.ModSecurity != "inherit" {
 		c.Mode = p.ModSecurity
 	}
@@ -403,7 +412,7 @@ func (s *Service) stateChanges(global WAFConfig, state SiteState) ([]fileChange,
 	if effective.ModSecurity.Mode == "Off" {
 		mode = "off"
 	}
-	snippetData := fmt.Sprintf("%smodsecurity %s;\nmodsecurity_rules_file %s;\nset $nginx_ui_crowdsec_enabled %s;\nset $nginx_ui_security_site_id %s;\naccess_by_lua_file %s;\n", snippetMarker, mode, rules, flag, siteID, accessHook)
+	snippetData := fmt.Sprintf("%smodsecurity %s;\nmodsecurity_rules_file %s;\nset $nginx_ui_crowdsec_enabled %s;\nset $nginx_ui_security_site_id %s;\nset $nginx_ui_crowdsec_allowlist \"%s\";\naccess_by_lua_file %s;\n", snippetMarker, mode, rules, flag, siteID, strings.Join(effective.ModSecurity.CrowdSecAllowlist, ","), accessHook)
 	for _, owned := range []struct{ path, prefix string }{{rules, marker}, {snippet, snippetMarker}} {
 		if err := safeFile(owned.path); err != nil {
 			return nil, err

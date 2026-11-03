@@ -37,7 +37,7 @@ RUN mkdir -p /tmp/security \
     && cp /tmp/security/lua-resty-string-0.16/lib/resty/*.lua /usr/local/lua/crowdsec/resty/ \
     && rm -rf /tmp/security
 COPY packaging/security/audit_reader.py packaging/security/audit_normalizer.py /usr/local/lib/nginx-ui-security/
-COPY packaging/security/security-access.lua packaging/security/nginx_ui_security_events.lua /usr/local/lua/nginx-ui/
+COPY packaging/security/security-access.lua packaging/security/nginx_ui_ip_allowlist.lua packaging/security/nginx_ui_security_events.lua /usr/local/lua/nginx-ui/
 COPY packaging/security/crowdsec-init.conf /usr/local/share/nginx-ui-security/crowdsec-init.conf
 COPY packaging/security/artifacts/nginx-ui /usr/local/bin/nginx-ui
 COPY packaging/security/entrypoint.sh packaging/security/restart.sh packaging/security/smoke.sh /usr/local/sbin/

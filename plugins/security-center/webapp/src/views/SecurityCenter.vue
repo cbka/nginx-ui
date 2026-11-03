@@ -7,6 +7,7 @@ import { getErrorMessage, useSettingsStore } from '@/runtime'
 import CommunitySharing from './CommunitySharing.vue'
 import { canManageSecurity, crowdsecListResult, normalizeDecisions, normalizeScenarios, parseExcludedRules } from './normalize'
 import SecurityEvents from './SecurityEvents.vue'
+import { validAllowlistDraft } from './sitePolicy'
 import SiteProtection from './SiteProtection.vue'
 
 const { message, modal } = App.useApp()
@@ -32,6 +33,11 @@ const scenarios = ref<Scenario[]>([])
 const waf = ref<ModSecurityConfig>()
 const savedWaf = ref('')
 const exclusions = ref('')
+const modsecurityAllowlist = ref('')
+const crowdsecAllowlist = ref('')
+function parseAllowlist(value: string) {
+  return value.split(/[\s,]+/).filter(Boolean)
+}
 const applied = ref<string>()
 const ban = reactive({ ip: '', duration: '4h', reason: '' })
 const scenarioName = ref('')
@@ -63,7 +69,12 @@ const visibleDecisions = computed(() => decisions.value.filter(item =>
 ))
 const excludedIds = computed(() => parseExcludedRules(exclusions.value))
 const wafPayload = computed(() => waf.value && excludedIds.value
-  ? { ...waf.value, excluded_rule_ids: excludedIds.value }
+  ? {
+      ...waf.value,
+      excluded_rule_ids: excludedIds.value,
+      modsecurity_allowlist: parseAllowlist(modsecurityAllowlist.value),
+      crowdsec_allowlist: parseAllowlist(crowdsecAllowlist.value),
+    }
   : undefined)
 const wafDirty = computed(() => JSON.stringify(wafPayload.value) !== savedWaf.value)
 const unsaved = computed(() => selectedSite.value
@@ -71,7 +82,7 @@ const unsaved = computed(() => selectedSite.value
   : wafDirty.value && !!waf.value)
 const wafValid = computed(() => {
   const config = wafPayload.value
-  return !!config && [1, 2, 3, 4].includes(config.paranoia_level)
+  return !!config && validAllowlistDraft(config.modsecurity_allowlist) && validAllowlistDraft(config.crowdsec_allowlist) && [1, 2, 3, 4].includes(config.paranoia_level)
     && Number.isInteger(config.inbound_threshold) && config.inbound_threshold >= 1 && config.inbound_threshold <= 1000
     && Number.isInteger(config.outbound_threshold) && config.outbound_threshold >= 1 && config.outbound_threshold <= 1000
 })
@@ -98,6 +109,8 @@ async function loadWaf() {
   try {
     waf.value = await security.modsecurity()
     exclusions.value = (waf.value.excluded_rule_ids ?? []).join(', ')
+    modsecurityAllowlist.value = (waf.value.modsecurity_allowlist ?? []).join('\n')
+    crowdsecAllowlist.value = (waf.value.crowdsec_allowlist ?? []).join('\n')
     savedWaf.value = JSON.stringify(wafPayload.value)
   }
   catch (e) {
@@ -232,12 +245,14 @@ function saveWaf() {
   const payload = {
     ...wafPayload.value,
     excluded_rule_ids: [...wafPayload.value.excluded_rule_ids],
+    modsecurity_allowlist: [...wafPayload.value.modsecurity_allowlist],
+    crowdsec_allowlist: [...wafPayload.value.crowdsec_allowlist],
   }
   modal.confirm({
     title: $gettext('Apply WAF configuration?'),
-    content: $gettext('Nginx configuration will be checked and reloaded. Off disables inspection; DetectionOnly records matches without blocking. Excluded rule IDs no longer protect requests. The CrowdSec default applies to websites that inherit it.'),
+    content: $gettext('Nginx configuration will be checked and reloaded. Off disables inspection; DetectionOnly records matches without blocking. Excluded rule IDs no longer protect requests. The CrowdSec default applies to websites that inherit it. IP allowlists bypass the respective protection; global allowlists also apply to websites with explicit settings.'),
     okText: $gettext('Validate and apply'),
-    okButtonProps: { danger: payload.mode !== 'On' || !payload.crowdsec_enabled || payload.excluded_rule_ids.length > 0 },
+    okButtonProps: { danger: payload.mode !== 'On' || !payload.crowdsec_enabled || payload.excluded_rule_ids.length > 0 || payload.modsecurity_allowlist.length > 0 || payload.crowdsec_allowlist.length > 0 },
     async onOk() {
       busy.value = true
       applied.value = undefined
@@ -441,6 +456,19 @@ onMounted(refresh)
                 </div>
                 <p class="muted">
                   {{ $gettext('Paranoia-Level bestimmt, welche Regeln prüfen. Die Punktegrenze bestimmt, ab wann Treffer zur Sperre führen. Beides ist weder ein Prozentwert noch die Anzahl erlaubter Angriffe.') }}
+                </p>
+                <h3>{{ $gettext('Globale vertrauenswürdige IP-Adressen und Netze') }}</h3>
+                <p class="muted">
+                  {{ $gettext('Gilt zusätzlich für alle verwalteten Websites, auch mit eigenen Schutzwerten. Pro Zeile eine IPv4-/IPv6-Adresse oder ein CIDR-Netz; höchstens 400 Einträge pro Liste. Beispiele: 192.0.2.10, 192.0.2.0/24, 2001:db8::/64. Die Gültigkeit wird vor dem Anwenden serverseitig geprüft.') }}
+                </p>
+                <AFormItem :label="$gettext('ModSecurity: IP-Ausnahmen (Whitelist)')" :help="!validAllowlistDraft(parseAllowlist(modsecurityAllowlist)) ? $gettext('Bitte höchstens 400 IPv4-/IPv6-Adressen oder CIDR-Netze eingeben, ohne Hostnamen oder Regeltext.') : $gettext('Anfragen dieser Quelladressen überspringen die ModSecurity-Prüfung vollständig, einschließlich eigener Pfadsperren. CrowdSec bleibt unabhängig davon wirksam.')" :validate-status="!validAllowlistDraft(parseAllowlist(modsecurityAllowlist)) ? 'error' : undefined">
+                  <ATextarea v-model:value="modsecurityAllowlist" :rows="3" placeholder="192.0.2.10&#10;2001:db8::/64" />
+                </AFormItem>
+                <AFormItem :label="$gettext('CrowdSec: IP-Ausnahmen (Whitelist)')" :help="!validAllowlistDraft(parseAllowlist(crowdsecAllowlist)) ? $gettext('Bitte höchstens 400 IPv4-/IPv6-Adressen oder CIDR-Netze eingeben, ohne Hostnamen oder Regeltext.') : $gettext('Für diese Quelladressen setzt Nginx keine CrowdSec-Sperren durch. Zentrale Entscheidungen, Erkennung und Community-Meldungen werden dadurch nicht gelöscht oder abgeschaltet. ModSecurity bleibt unabhängig aktiv.')" :validate-status="!validAllowlistDraft(parseAllowlist(crowdsecAllowlist)) ? 'error' : undefined">
+                  <ATextarea v-model:value="crowdsecAllowlist" :rows="3" placeholder="192.0.2.10&#10;2001:db8::/64" />
+                </AFormItem>
+                <p class="muted">
+                  {{ $gettext('Entscheidend ist die von Nginx ermittelte Client-IP. Hinter einem Proxy muss die vertrauenswürdige Weitergabe der echten Client-IP korrekt eingerichtet sein. Wird nur die NAT-Gateway-Adresse angezeigt, diese nicht freigeben: Sonst umgehen alle Besucher hinter diesem Gateway den jeweiligen Schutz. 0.0.0.0/0 nimmt alle IPv4-Adressen aus, ::/0 alle IPv6-Adressen.') }}
                 </p>
                 <AFormItem :label="$gettext('Excluded rule IDs')" :validate-status="excludedIds === undefined ? 'error' : undefined" :help="excludedIds === undefined ? $gettext('Use up to 200 OWASP CRS rule IDs (900000–999999), separated by commas or spaces.') : $gettext('Diese Regelnummern werden global ausgenommen. Bevorzuge bei Fehlalarmen eine Ausnahme nur für die betroffene Website, den Pfad und gegebenenfalls den Parameter. Kommagetrennte IDs, z. B. 942100; kein freier Regeltext.')">
                   <ATextarea v-model:value="exclusions" :rows="3" placeholder="920350, 942100" />

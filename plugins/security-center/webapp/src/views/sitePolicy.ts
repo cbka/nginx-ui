@@ -8,6 +8,8 @@ export function inheritedSitePolicy(): SiteSecurityPolicy {
     inbound_threshold: null,
     outbound_threshold: null,
     excluded_rule_ids: [],
+    modsecurity_allowlist: [],
+    crowdsec_allowlist: [],
     exceptions: [],
     blocked_paths: [],
   }
@@ -27,8 +29,16 @@ export function validSitePolicy(policy: SiteSecurityPolicy | undefined): boolean
     && policy.exceptions.length <= 100 && policy.exceptions.every(validException)
     && policy.blocked_paths.length <= 100 && policy.blocked_paths.every(validExactPath)
     && new Set(policy.blocked_paths).size === policy.blocked_paths.length
+    && validAllowlistDraft(policy.modsecurity_allowlist)
+    && validAllowlistDraft(policy.crowdsec_allowlist)
     && policy.excluded_rule_ids.length <= 200
     && policy.excluded_rule_ids.every(value => Number.isInteger(value) && value >= 900000 && value <= 999999)
+}
+
+// Network parsing is authoritative on the server before configuration is applied.
+export function validAllowlistDraft(entries: string[] | undefined): boolean {
+  return entries === undefined || (Array.isArray(entries) && entries.length <= 400
+    && entries.every(entry => typeof entry === 'string' && /^[\da-f:./]{1,64}$/i.test(entry)))
 }
 
 export function validExactPath(path: string): boolean {
@@ -58,6 +68,12 @@ export function cloneSitePolicy(policy: SiteSecurityPolicy): SiteSecurityPolicy 
   return {
     ...policy,
     excluded_rule_ids: [...policy.excluded_rule_ids],
+    modsecurity_allowlist: [
+      ...(policy.modsecurity_allowlist ?? []),
+    ],
+    crowdsec_allowlist: [
+      ...(policy.crowdsec_allowlist ?? []),
+    ],
     blocked_paths: [...policy.blocked_paths],
     exceptions: policy.exceptions.map(item => ({ ...item })),
   }

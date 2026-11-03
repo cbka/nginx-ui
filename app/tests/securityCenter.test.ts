@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { canManageSecurity, crowdsecListResult, normalizeDecisions, normalizeScenarios, parseExcludedRules } from '../../plugins/security-center/webapp/src/views/normalize'
 import { canApplySharing, sharingConfiguredValue } from '../../plugins/security-center/webapp/src/views/sharing'
-import { canSyncSavedPolicy, cloneSitePolicy, exceptionFromEvent, inheritedSitePolicy, templateChanges, validExactPath, validException, validSitePolicy, validTemplatePolicy } from '../../plugins/security-center/webapp/src/views/sitePolicy'
+import { canSyncSavedPolicy, cloneSitePolicy, exceptionFromEvent, inheritedSitePolicy, templateChanges, validAllowlistDraft, validExactPath, validException, validSitePolicy, validTemplatePolicy } from '../../plugins/security-center/webapp/src/views/sitePolicy'
 
 describe('Security Center CLI responses', () => {
   test('normalizes nested alerts without losing decision IDs or reasons', () => {
@@ -97,6 +97,8 @@ describe('website policy inheritance', () => {
       inbound_threshold: null,
       outbound_threshold: null,
       excluded_rule_ids: [],
+      modsecurity_allowlist: [],
+      crowdsec_allowlist: [],
       exceptions: [],
       blocked_paths: [],
     })
@@ -202,6 +204,32 @@ describe('Reusable site security templates', () => {
     const changes = templateChanges(original, inheritedSitePolicy())
     expect(changes.map(change => change.field)).toEqual(['exceptions', 'blocked_paths'])
     expect(changes[0].after).toBe('[]')
+  })
+})
+
+describe('IP allowlist policy drafts', () => {
+  test('defaults inherit empty lists and legacy payloads remain valid', () => {
+    const defaults = inheritedSitePolicy()
+    expect(defaults.modsecurity_allowlist).toEqual([])
+    expect(defaults.crowdsec_allowlist).toEqual([])
+    delete defaults.modsecurity_allowlist
+    delete defaults.crowdsec_allowlist
+    expect(validSitePolicy(defaults)).toBe(true)
+  })
+  test('template edits cannot mutate saved allowlists and removals appear in comparison', () => {
+    const saved = { ...inheritedSitePolicy(), modsecurity_allowlist: ['192.0.2.1'], crowdsec_allowlist: ['2001:db8::/64'] }
+    const draft = cloneSitePolicy(saved)
+    draft.modsecurity_allowlist!.push('192.0.2.0/24')
+    draft.crowdsec_allowlist!.splice(0)
+    expect(saved.modsecurity_allowlist).toEqual(['192.0.2.1'])
+    expect(saved.crowdsec_allowlist).toEqual(['2001:db8::/64'])
+    expect(templateChanges(saved, inheritedSitePolicy()).map(change => change.field)).toEqual(['modsecurity_allowlist', 'crowdsec_allowlist'])
+  })
+  test('draft validation bounds lists and rejects config text before server network validation', () => {
+    expect(validAllowlistDraft(['192.0.2.10', '192.0.2.0/24', '2001:db8::/64'])).toBe(true)
+    expect(validAllowlistDraft(Array.from({ length: 401 }, () => '192.0.2.1'))).toBe(false)
+    expect(validAllowlistDraft(['192.0.2.1; allow all'])).toBe(false)
+    expect(validTemplatePolicy({ ...inheritedSitePolicy(), crowdsec_allowlist: ['example.com'] })).toBe(false)
   })
 })
 

@@ -4,7 +4,7 @@ import security from '@/api/security_center'
 import { getErrorMessage, useSettingsStore } from '@/runtime'
 import { canManageSecurity, parseExcludedRules } from './normalize'
 import SecurityTemplates from './SecurityTemplates.vue'
-import { canSyncSavedPolicy, exceptionFromEvent, inheritedSitePolicy, validExactPath, validException, validSitePolicy } from './sitePolicy'
+import { canSyncSavedPolicy, exceptionFromEvent, inheritedSitePolicy, validAllowlistDraft, validExactPath, validException, validSitePolicy } from './sitePolicy'
 
 const props = defineProps<{ name: string, draft?: { event: SecurityEvent, action: 'exception' | 'block' } }>()
 const emit = defineEmits<{ busy: [value: boolean], dirty: [value: boolean] }>()
@@ -23,6 +23,11 @@ const paranoiaSelection = computed<number | string>({
   },
 })
 const exclusions = ref('')
+const modsecurityAllowlist = ref('')
+const crowdsecAllowlist = ref('')
+function parseAllowlist(value: string) {
+  return value.split(/[\s,]+/).filter(Boolean)
+}
 const blockedPaths = ref('')
 let draftConsumed = false
 const loading = ref(false)
@@ -45,6 +50,8 @@ const payload = computed(() => policy.value && ids.value
   ? {
       ...policy.value,
       excluded_rule_ids: ids.value,
+      modsecurity_allowlist: parseAllowlist(modsecurityAllowlist.value),
+      crowdsec_allowlist: parseAllowlist(crowdsecAllowlist.value),
       blocked_paths: blockedPaths.value.split(/\r?\n/).map(path => path.trim()).filter(Boolean),
     }
   : undefined)
@@ -69,6 +76,8 @@ function restoreForm() {
   }
   exclusions.value = policy.value.excluded_rule_ids.join(', ')
   blockedPaths.value = policy.value.blocked_paths.join('\n')
+  modsecurityAllowlist.value = (policy.value.modsecurity_allowlist ?? []).join('\n')
+  crowdsecAllowlist.value = (policy.value.crowdsec_allowlist ?? []).join('\n')
 }
 
 async function load() {
@@ -86,6 +95,8 @@ async function load() {
     state.value.policy.excluded_rule_ids ??= []
     state.value.policy.exceptions ??= []
     state.value.policy.blocked_paths ??= []
+    state.value.policy.modsecurity_allowlist ??= []
+    state.value.policy.crowdsec_allowlist ??= []
     restoreForm()
     if (props.draft && !draftConsumed && policy.value && !state.value.replica) {
       draftConsumed = true
@@ -116,6 +127,8 @@ function templateDraft(next: SiteSecurityPolicy) {
   policy.value = next
   exclusions.value = next.excluded_rule_ids.join(', ')
   blockedPaths.value = next.blocked_paths.join('\n')
+  modsecurityAllowlist.value = (next.modsecurity_allowlist ?? []).join('\n')
+  crowdsecAllowlist.value = (next.crowdsec_allowlist ?? []).join('\n')
   resultText.value = $gettext('Unsaved template draft. Review all changes, then validate and apply to this website.')
 }
 
@@ -126,6 +139,8 @@ function inheritDefaults() {
   policy.value = inheritedSitePolicy()
   exclusions.value = ''
   blockedPaths.value = ''
+  modsecurityAllowlist.value = ''
+  crowdsecAllowlist.value = ''
   resultText.value = $gettext('Inherited defaults selected. Validate and apply to save this change.')
 }
 
@@ -136,14 +151,16 @@ function apply() {
   const change = {
     ...payload.value,
     excluded_rule_ids: [...payload.value.excluded_rule_ids],
+    modsecurity_allowlist: [...payload.value.modsecurity_allowlist],
+    crowdsec_allowlist: [...payload.value.crowdsec_allowlist],
     exceptions: payload.value.exceptions.map(item => ({ ...item })),
     blocked_paths: [...payload.value.blocked_paths],
   }
   modal.confirm({
     title: $gettext('Apply protection to %{name}?', { name }),
-    content: $gettext('This changes every server block in this website configuration. Nginx will validate and reload. Disabling inspection or CrowdSec enforcement reduces protection; exclusions are added to global exclusions. Exact path block rules deny matching requests with HTTP 403 when WAF blocking is active.'),
+    content: $gettext('This changes every server block in this website configuration. Nginx will validate and reload. Disabling inspection or CrowdSec enforcement reduces protection; exclusions are added to global exclusions. Exact path block rules deny matching requests with HTTP 403 when WAF blocking is active. IP allowlists bypass the respective protection and are added to global allowlists.'),
     okText: $gettext('Validate and apply'),
-    okButtonProps: { danger: change.modsecurity !== 'On' || change.crowdsec === 'off' || change.excluded_rule_ids.length > 0 || change.exceptions.length > 0 || change.blocked_paths.length > 0 },
+    okButtonProps: { danger: change.modsecurity !== 'On' || change.crowdsec === 'off' || change.excluded_rule_ids.length > 0 || change.exceptions.length > 0 || change.blocked_paths.length > 0 || change.modsecurity_allowlist.length > 0 || change.crowdsec_allowlist.length > 0 },
     async onOk() {
       if (!mounted || props.name !== name || !canManageSecurity(settings.node.id))
         throw new Error($gettext('The website or controller changed. Reopen the policy before applying it.'))
@@ -222,6 +239,12 @@ watch(() => props.name, () => {
           {{ $gettext('Combined excluded rule IDs') }}: {{ state.effective.modsecurity.excluded_rule_ids?.join(', ') || $gettext('None') }}
         </p>
       </div>
+      <p class="muted">
+        {{ $gettext('Wirksame gespeicherte ModSecurity-IP-Ausnahmen') }}: {{ state.effective.modsecurity.modsecurity_allowlist?.join(', ') || $gettext('Keine') }}
+      </p>
+      <p class="muted">
+        {{ $gettext('Wirksame gespeicherte CrowdSec-IP-Ausnahmen') }}: {{ state.effective.modsecurity.crowdsec_allowlist?.join(', ') || $gettext('Keine') }}
+      </p>
       <SecurityTemplates v-model:notice="templateNotice" :name="name" :policy="payload" :disabled="state.replica || syncing || saving || loading" @draft="templateDraft" />
       <details class="field-guide section-gap">
         <summary>{{ $gettext('Welche Einstellungen passen zu meiner Website?') }}</summary>
@@ -261,6 +284,19 @@ watch(() => props.name, () => {
           <p>{{ $gettext('Bei Fehlalarmen möglichst eine passende Ausnahme für den betroffenen Pfad oder Parameter anlegen, statt die Schwellen für die gesamte Website zu erhöhen.') }}</p>
           <a href="https://coreruleset.org/docs/2-how-crs-works/2-2-paranoia_levels/" target="_blank" rel="noopener noreferrer">{{ $gettext('OWASP CRS: Prüfstrenge und Punktesystem erklärt (Englisch)') }}</a>
         </details>
+        <h3>{{ $gettext('Zusätzliche vertrauenswürdige IP-Adressen und Netze') }}</h3>
+        <p class="muted">
+          {{ $gettext('Diese Ausnahmen gelten nur für diese Website, zusätzlich zu den globalen Listen. Leer übernimmt nur die globalen Ausnahmen; globale Einträge lassen sich hier nicht aufheben. Pro Zeile eine IPv4-/IPv6-Adresse oder ein CIDR-Netz; höchstens 400 Einträge je Liste einschließlich der globalen Einträge. Beispiele: 192.0.2.10, 192.0.2.0/24, 2001:db8::/64. Die Gültigkeit wird vor dem Anwenden serverseitig geprüft.') }}
+        </p>
+        <AFormItem :label="$gettext('ModSecurity: IP-Ausnahmen (Whitelist)')" :help="!validAllowlistDraft(parseAllowlist(modsecurityAllowlist)) ? $gettext('Bitte höchstens 400 IPv4-/IPv6-Adressen oder CIDR-Netze eingeben, ohne Hostnamen oder Regeltext.') : $gettext('Anfragen dieser Quelladressen überspringen die ModSecurity-Prüfung vollständig, einschließlich eigener Pfadsperren. CrowdSec bleibt unabhängig davon wirksam.')" :validate-status="!validAllowlistDraft(parseAllowlist(modsecurityAllowlist)) ? 'error' : undefined">
+          <ATextarea v-model:value="modsecurityAllowlist" :rows="3" placeholder="192.0.2.10&#10;2001:db8::/64" />
+        </AFormItem>
+        <AFormItem :label="$gettext('CrowdSec: IP-Ausnahmen (Whitelist)')" :help="!validAllowlistDraft(parseAllowlist(crowdsecAllowlist)) ? $gettext('Bitte höchstens 400 IPv4-/IPv6-Adressen oder CIDR-Netze eingeben, ohne Hostnamen oder Regeltext.') : $gettext('Für diese Quelladressen setzt Nginx keine CrowdSec-Sperren durch. Zentrale Entscheidungen, Erkennung und Community-Meldungen werden dadurch nicht gelöscht oder abgeschaltet. ModSecurity bleibt unabhängig aktiv.')" :validate-status="!validAllowlistDraft(parseAllowlist(crowdsecAllowlist)) ? 'error' : undefined">
+          <ATextarea v-model:value="crowdsecAllowlist" :rows="3" placeholder="192.0.2.10&#10;2001:db8::/64" />
+        </AFormItem>
+        <p class="muted">
+          {{ $gettext('Entscheidend ist die von Nginx ermittelte Client-IP. Hinter einem Proxy muss die vertrauenswürdige Weitergabe der echten Client-IP korrekt eingerichtet sein. Wird nur die NAT-Gateway-Adresse angezeigt, diese nicht freigeben: Sonst umgehen alle Besucher hinter diesem Gateway den jeweiligen Schutz. 0.0.0.0/0 nimmt alle IPv4-Adressen aus, ::/0 alle IPv6-Adressen.') }}
+        </p>
         <AFormItem :label="$gettext('Additional rule exclusions for this website')" :validate-status="ids === undefined ? 'error' : undefined" :help="ids === undefined ? $gettext('Use up to 200 OWASP CRS rule IDs (900000–999999), separated by commas or spaces.') : $gettext('Diese CRS-Regeln werden auf der gesamten Website übersprungen, zusätzlich zu globalen Ausnahmen. IDs aus einem geprüften Ereignis übernehmen. Leer entfernt nur lokale Ausnahmen; gezielte Ausnahmen unten sind enger begrenzt.')">
           <ATextarea v-model:value="exclusions" :rows="3" placeholder="942100" />
         </AFormItem>

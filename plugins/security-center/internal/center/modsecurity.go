@@ -14,15 +14,23 @@ import (
 const marker = "# nginx-ui-security-center: "
 
 type WAFConfig struct {
-	CrowdSecEnabled   bool   `json:"crowdsec_enabled"`
-	Mode              string `json:"mode"`
-	ParanoiaLevel     int    `json:"paranoia_level"`
-	InboundThreshold  int    `json:"inbound_threshold"`
-	OutboundThreshold int    `json:"outbound_threshold"`
-	ExcludedRuleIDs   []int  `json:"excluded_rule_ids"`
+	ModSecurityAllowlist []string `json:"modsecurity_allowlist"`
+	CrowdSecAllowlist    []string `json:"crowdsec_allowlist"`
+	CrowdSecEnabled      bool     `json:"crowdsec_enabled"`
+	Mode                 string   `json:"mode"`
+	ParanoiaLevel        int      `json:"paranoia_level"`
+	InboundThreshold     int      `json:"inbound_threshold"`
+	OutboundThreshold    int      `json:"outbound_threshold"`
+	ExcludedRuleIDs      []int    `json:"excluded_rule_ids"`
 }
 
 func (c WAFConfig) Validate() error {
+	if _, err := mergeIPAllowlist(c.ModSecurityAllowlist); err != nil {
+		return err
+	}
+	if _, err := mergeIPAllowlist(c.CrowdSecAllowlist); err != nil {
+		return err
+	}
 	if c.Mode != "Off" && c.Mode != "DetectionOnly" && c.Mode != "On" {
 		return ErrInvalid
 	}
@@ -123,6 +131,10 @@ func (s *Service) render(c WAFConfig) ([]byte, error) {
 	j, _ := json.Marshal(c)
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s%s\nInclude \"%s\"\nSecRuleEngine %s\nInclude \"%s\"\n", marker, j, s.Config.BaseConfig, c.Mode, s.Config.CRSSetup)
+	if len(c.ModSecurityAllowlist) > 0 {
+		ranges, _ := mergeIPAllowlist(c.ModSecurityAllowlist)
+		fmt.Fprintf(&b, "SecRule REMOTE_ADDR \"@ipMatch %s\" \"id:2200000,phase:1,pass,nolog,t:none,ctl:ruleEngine=Off\"\n", modSecurityIPMatch(ranges))
+	}
 	fmt.Fprintf(&b, "SecAction \"id:900110,phase:1,pass,nolog,t:none,setvar:tx.paranoia_level=%d\"\n", c.ParanoiaLevel)
 	fmt.Fprintf(&b, "SecAction \"id:900120,phase:1,pass,nolog,t:none,setvar:tx.inbound_anomaly_score_threshold=%d,setvar:tx.outbound_anomaly_score_threshold=%d\"\n", c.InboundThreshold, c.OutboundThreshold)
 	fmt.Fprintf(&b, "Include \"%s\"\n", s.Config.CRSRules)

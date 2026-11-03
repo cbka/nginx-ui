@@ -1,7 +1,7 @@
 {
   "id": "io.github.mctdatapool.security-center",
   "name": "Security Center",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Per-site ModSecurity OWASP CRS and CrowdSec security management",
   "api_version": 1,
   "server": {
