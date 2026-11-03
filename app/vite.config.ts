@@ -81,7 +81,8 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       vueJsx(),
-      vitePluginBuildId(),
+      // Generate metadata before imports are bundled, including non-CI builds.
+      vitePluginBuildId({ prepare: true }),
       svgLoader(),
       UnoCSS(),
       Components({

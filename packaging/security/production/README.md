@@ -79,3 +79,30 @@ failure/timeout, 2 invalid input or unavailable local runtime.
    image rollback alone can leave unsupported Lua/module directives behind.
 6. Only after canary acceptance proceed with the separately coordinated rollout.
    The helper itself never deploys or changes production.
+
+## Host version metadata (required before packaging)
+
+The frontend build must generate its version **before bundling imports**. The
+Vite build-id plugin therefore uses `prepare: true`, including local builds where
+`CI` is unset. Its source of truth is `app/package.json`; overriding only the Go
+version produces a false node-compatibility warning and incorrect plugin host
+metadata.
+
+1. Run `python3 packaging/security/production/version_metadata.py prepare --version 3.0.0-security.4`
+   (substitute the intended release). This updates the package version, never an
+   already-built frontend.
+2. Build the frontend using the task's bounded build runner. The build writes
+   matching `app/src/version.json` and `app/dist/version.json`.
+3. Run `python3 packaging/security/production/version_metadata.py generate`.
+   This rejects missing/stale/mismatched build metadata, then generates the Go
+   version initializer from that exact frontend build and the Git commit hash.
+4. Compile the host with that generated initializer and the newly built embedded
+   frontend. Do not separately override `version.Version`, build IDs, or hash.
+   A build-time timestamp is independent and may still be passed through ldflags.
+5. Before rollout, compare the host version endpoint and the served frontend's
+   `version.json`; the version and build IDs must match. Package the verified host
+   binary using `Dockerfile.host` and set `HOST_VERSION` to the same release.
+
+The helper does not build, deploy, rewrite compiled bundles or alter live
+configuration. Regression checks: `python3 -m unittest discover -s
+packaging/security/production -p test_version_metadata.py`.
