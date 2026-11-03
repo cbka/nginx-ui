@@ -117,3 +117,27 @@ func TestEventNodeFilterIsAQuotedCollectorLabel(t *testing.T) {
 		t.Fatalf("control accepted: %v", err)
 	}
 }
+
+func TestEventsPreserveCollectorSourceIP(t *testing.T) {
+	for _, source := range []string{"modsecurity", "crowdsec"} {
+		for _, address := range []string{"192.0.2.8", "2001:db8::8", ""} {
+			t.Run(source+"/"+address, func(t *testing.T) {
+				line, _ := json.Marshal(map[string]string{"source": source, "client_ip": address, "x_forwarded_for": "203.0.113.99"})
+				body, _ := json.Marshal(map[string]any{"status": "success", "data": map[string]any{"resultType": "streams", "result": []any{
+					map[string]any{"stream": map[string]string{"node": "kub1", "pod": "peer-0", "client_ip": "203.0.113.88"}, "values": [][]string{{"1730000000000000000", string(line)}}},
+				}}})
+				got, err := decodeEvents(body, source, "", EventPage{Items: []SecurityEvent{}, Limit: 10})
+				if err != nil || len(got.Items) != 1 {
+					t.Fatalf("unexpected response: %+v, %v", got, err)
+				}
+				if got.Items[0].ClientIP != address {
+					t.Fatalf("source IP lost or replaced: %q", got.Items[0].ClientIP)
+				}
+				encoded, _ := json.Marshal(got.Items[0])
+				if strings.Contains(string(encoded), "203.0.113.") {
+					t.Fatal("untrusted IP field leaked into event")
+				}
+			})
+		}
+	}
+}

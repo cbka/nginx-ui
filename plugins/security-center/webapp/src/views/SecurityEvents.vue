@@ -137,7 +137,7 @@ watch([source, vhost, since], load, { immediate: true })
           <span class="muted">{{ displayTime(event.timestamp) }}</span>
         </div>
         <div class="tags">
-          <ATag>{{ event.node || $gettext('Node unknown') }}</ATag><ATag :color="event.source === 'modsecurity' ? 'orange' : 'blue'">
+          <ATag class="source-ip">{{ $gettext('Quell-IP') }}: <code>{{ event.client_ip || $gettext('Nicht im Ereignis enthalten') }}</code></ATag><ATag>{{ event.node || $gettext('Node unknown') }}</ATag><ATag :color="event.source === 'modsecurity' ? 'orange' : 'blue'">
             {{ event.source }}
           </ATag><ATag v-if="event.rule_id">
             {{ $gettext('Rule') }} {{ event.rule_id }}
@@ -151,7 +151,7 @@ watch([source, vhost, since], load, { immediate: true })
           {{ event.message }}
         </p>
         <div class="request">
-          <code>{{ event.method || '—' }} {{ event.path || '—' }}</code><span v-if="event.client_ip">{{ $gettext('Client') }}: <code>{{ event.client_ip }}</code></span>
+          <code>{{ event.method || '—' }} {{ event.path || '—' }}</code>
         </div>
         <details>
           <summary>{{ $gettext('Request details') }}</summary>
@@ -185,6 +185,7 @@ watch([source, vhost, since], load, { immediate: true })
 .event-head, .request { display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
 .event-message, code, dd { overflow-wrap: anywhere; }
+.source-ip { white-space: normal; max-width: 100%; }
 details { margin-top: 12px; } summary { cursor: pointer; color: var(--ant-color-text-secondary); }
 dl { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0,1fr); gap: 8px; } dd { margin: 0; }
 .actions { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }

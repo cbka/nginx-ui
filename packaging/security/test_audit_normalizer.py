@@ -25,6 +25,17 @@ class NormalizerTests(unittest.TestCase):
         self.assertEqual(rows[0]["node"], "kub1")
         self.assertEqual(rows[0]["vhost"], "trusted-site")
 
+    def test_source_ip_uses_transaction_address_not_forwarded_headers(self):
+        for address, expected in [("192.0.2.8", "192.0.2.8"),
+                                  ("2001:db8:0:0::8", "2001:db8::8"),
+                                  (None, ""), ("not-an-ip", "")]:
+            with self.subTest(address=address):
+                sample = self.sample()
+                sample["transaction"]["client_ip"] = address
+                sample["transaction"]["request"]["headers"].update({
+                    "X-Forwarded-For": "203.0.113.99", "X-Real-IP": "203.0.113.99"})
+                self.assertEqual(modsecurity(sample, "kub1")[0]["client_ip"], expected)
+
     def test_same_request_distinct_rule_events_stable_ids(self):
         sample = self.sample()
         sample["transaction"]["messages"] *= 2
