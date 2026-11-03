@@ -91,6 +91,10 @@ func runTestPlugin(mode string) {
 		case protocol.MethodConfigure:
 			fmt.Fprintln(os.Stderr, "plugin configured")
 			pluginReply(msg.ID, protocol.EmptyResult{})
+		case "plugin.activate":
+			pluginReply(msg.ID, map[string]bool{"activated": mode != "activate-denied"})
+		case "plugin.deactivate":
+			pluginReply(msg.ID, map[string]bool{"deactivated": mode != "deactivate-denied"})
 		case protocol.MethodPing:
 			if mode == pluginModeDeaf {
 				continue

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { canManageSecurity, crowdsecListResult, normalizeDecisions, normalizeScenarios, parseExcludedRules } from '@/views/security_center/normalize'
-import { canApplySharing, sharingConfiguredValue } from '@/views/security_center/sharing'
-import { canSyncSavedPolicy, cloneSitePolicy, exceptionFromEvent, inheritedSitePolicy, templateChanges, validExactPath, validException, validSitePolicy, validTemplatePolicy } from '@/views/security_center/sitePolicy'
+import { canManageSecurity, crowdsecListResult, normalizeDecisions, normalizeScenarios, parseExcludedRules } from '../../plugins/security-center/webapp/src/views/normalize'
+import { canApplySharing, sharingConfiguredValue } from '../../plugins/security-center/webapp/src/views/sharing'
+import { canSyncSavedPolicy, cloneSitePolicy, exceptionFromEvent, inheritedSitePolicy, templateChanges, validExactPath, validException, validSitePolicy, validTemplatePolicy } from '../../plugins/security-center/webapp/src/views/sitePolicy'
 
 describe('Security Center CLI responses', () => {
   test('normalizes nested alerts without losing decision IDs or reasons', () => {

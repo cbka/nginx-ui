@@ -17,6 +17,7 @@ import { applyAuthHeaders } from '@/lib/http/interceptors'
 import { useSettingsStore, useUserStore } from '@/pinia'
 import router from '@/routes'
 import { chunkLoader } from './chunks'
+import { pluginRequestPath } from './request'
 import { trackPluginRoute } from './routeRemovers'
 import { usePluginStore } from './store'
 import { buildPluginWebSocketUrl } from './wsUrl'
@@ -134,6 +135,13 @@ export function createRegistry(
     registerSettingsPanel,
     loadChunk,
     http: pluginHttp,
+    request: <T>(method: 'get' | 'post' | 'put' | 'delete', path: string, body?: unknown, options?: { params?: Record<string, unknown> }): Promise<T> => {
+      const url = pluginRequestPath(pluginId, path)
+      const config = { params: options?.params, skipErrHandling: true, skipNodeProxy: true }
+      return method === 'get' || method === 'delete'
+        ? http[method](url, config)
+        : http[method](url, body, config)
+    },
     wsUrl,
     coreHttp: http,
     manifest,

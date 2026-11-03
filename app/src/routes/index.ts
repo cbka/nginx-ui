@@ -21,7 +21,6 @@ import { nodesRoutes } from './modules/nodes'
 import { notificationsRoutes } from './modules/notifications'
 import { preferenceRoutes } from './modules/preference'
 import { securityRoutes } from './modules/security'
-import { securityCenterRoutes } from './modules/security_center'
 import { sitesRoutes } from './modules/sites'
 import { streamsRoutes } from './modules/streams'
 import { systemRoutes } from './modules/system'
@@ -48,7 +47,6 @@ const mainLayoutChildren: RouteRecordRaw[] = [
   ...ingressRoutes,
   ...accessListsRoutes,
   ...securityRoutes,
-  ...securityCenterRoutes,
   ...configRoutes,
   ...certificatesRoutes,
   ...dnsRoutes,

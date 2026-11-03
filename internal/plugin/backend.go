@@ -31,8 +31,10 @@ const defaultLocale = "en"
 type hostBackend struct {
 	manager *Manager
 	// writer and confDir replace the nginx of the host in tests.
-	writer  configWriter
-	confDir func() string
+	writer            configWriter
+	confDir           func() string
+	transactionTest   func() error
+	transactionReload func() error
 }
 
 // hostBackend returns the host API implementation of this manager.

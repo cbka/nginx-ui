@@ -1,6 +1,9 @@
 package plugin
 
-import "github.com/0xJacky/Nginx-UI/internal/plugin/protocol"
+import (
+	"github.com/0xJacky/Nginx-UI/internal/plugin/protocol"
+	"slices"
+)
 
 // InitializeResult returns what a running plugin answered during its
 // handshake. The http capability uses it to find the Windows loopback port a
@@ -35,4 +38,15 @@ func (m *Manager) HTTPSecret(id string) (string, bool) {
 		return "", false
 	}
 	return supervisor.HTTPSecret()
+}
+
+// PrivilegedHTTP reports the signed manifest's local administrative requirement.
+func (m *Manager) PrivilegedHTTP(id string) bool {
+	item, ok := m.lookup(id)
+	if !ok {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return slices.Contains(item.manifest.Permissions, "http.privileged")
 }

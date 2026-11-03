@@ -177,7 +177,7 @@ def main():
     parser.add_argument("--source", choices=["modsecurity", "crowdsec"], required=True)
     parser.add_argument("--node", required=True)
     parser.add_argument("--audit-file")
-    parser.add_argument("--policy-dir", default="/etc/nginx/security-center/sites")
+    parser.add_argument("--policy-dir", default="/etc/nginx/plugins-persistent/io.github.mctdatapool.security-center/sites")
     args = parser.parse_args()
     vhost = site_identity(args.audit_file, args.policy_dir) if args.audit_file else ""
     while line := sys.stdin.readline(MAX_LINE + 1):

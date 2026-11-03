@@ -147,6 +147,8 @@ export interface PluginRegistry {
   loadChunk: (name: string) => Promise<Record<string, unknown>>
   /** Client whose baseURL is ./api/plugins/{id}/http. */
   http: AxiosInstance
+  /** Own-plugin JSON requests with host secure-session challenge/retry handling. */
+  request: <T>(method: 'get' | 'post' | 'put' | 'delete', path: string, body?: unknown, options?: { params?: Record<string, unknown> }) => Promise<T>
   /**
    * Absolute ws or wss URL of a path under the plugin http capability, carrying
    * the credentials the host needs. Absent on hosts without WebSocket support,

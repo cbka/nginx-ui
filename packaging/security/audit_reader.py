@@ -157,7 +157,7 @@ def main():
     # One owner per cursor/output stream; other instances fail instead of racing.
     lock = open(state.parent / "reader.lock", "w")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    reader = Reader("/var/log/nginx/modsecurity", "/etc/nginx/security-center/sites",
+    reader = Reader("/var/log/nginx/modsecurity", "/etc/nginx/plugins-persistent/io.github.mctdatapool.security-center/sites",
                     "/var/log/nginx/security-events.jsonl", state, node, "/var/log/nginx/error.log")
     running = True
     def stop(_signum, _frame):

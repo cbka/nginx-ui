@@ -172,6 +172,16 @@ func (m *Manager) Install(ctx context.Context, archivePath string, opts InstallO
 	// Cluster sync pushes the very bytes this node was given, so the package
 	// is kept next to the plugins instead of being rebuilt from the files.
 	m.keepArchive(manifest.ID, manifest.Version, archivePath)
+	if current, ok := m.lookup(manifest.ID); ok {
+		if err := m.activateEntry(ctx, current); err != nil {
+			return nil, err
+		}
+	}
+	action := ActionInstalled
+	if upgrading {
+		action = ActionUpgraded
+	}
+	publishChange(manifest.ID, action)
 	return info, nil
 }
 
@@ -331,12 +341,6 @@ func (m *Manager) finishInstall(ctx context.Context, manifest *protocol.Manifest
 		}
 	}
 
-	action := ActionInstalled
-	if upgrading {
-		action = ActionUpgraded
-	}
-	publishChange(manifest.ID, action)
-
 	info := m.infoOf(item)
 	return &info, nil
 }
@@ -393,6 +397,9 @@ func (m *Manager) uninstall(ctx context.Context, id string, cascade bool, seen m
 		}
 	}
 
+	if err := m.deactivateEntry(ctx, item, "uninstall"); err != nil {
+		return err
+	}
 	m.dropSupervisor(ctx, item)
 	m.stopEventPump(item)
 
@@ -522,6 +529,10 @@ func (m *Manager) EnableWith(ctx context.Context, id string, opts EnableOptions)
 		return nil, err
 	}
 
+	if err := m.activateEntry(ctx, item); err != nil {
+		return nil, err
+	}
+
 	publishChange(id, ActionEnabled)
 	info := m.infoOf(item)
 	return &info, nil
@@ -555,11 +566,19 @@ func (m *Manager) disable(ctx context.Context, id string) (*Info, error) {
 		return nil, ErrPluginNotFound
 	}
 
+	if err := m.deactivateEntry(ctx, item, "disable"); err != nil {
+		return nil, err
+	}
+
 	// Whatever depends on this plugin cannot keep running without it.
 	for _, dependent := range m.dependents(id) {
 		other, found := m.lookup(dependent)
 		if !found {
 			continue
+		}
+		if err := m.deactivateEntry(ctx, other, "disable"); err != nil {
+			m.recordError(item, err)
+			return nil, err
 		}
 		m.stopEntry(ctx, other)
 		m.recordError(other, cosy.WrapErrorWithParams(ErrDependencyMissing, id))

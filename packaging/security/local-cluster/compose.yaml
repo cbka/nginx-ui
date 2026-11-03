@@ -3,7 +3,7 @@ x-logging: &logging
   driver: json-file
   options: {max-size: "10m", max-file: "3"}
 x-node: &node
-  image: codex/nginx-ui-security:fork-20261103
+  image: codex/nginx-ui-security:plugin-20261103
   pull_policy: never
   restart: unless-stopped
   logging: *logging
@@ -15,11 +15,11 @@ x-node: &node
     codex.task: nginx-security-local-cluster
   networks: [lab]
   environment: &node-env
-    NGINX_UI_SECURITY_CENTER_ENABLED: "true"
-    NGINX_UI_SECURITY_CENTER_CROWDSEC_ENABLED: "true"
-    NGINX_UI_SECURITY_CENTER_MODSECURITY_ENABLED: "true"
-    NGINX_UI_SECURITY_CENTER_SHARING_CONFIG_PATH: /etc/crowdsec/config.yaml
-    NGINX_UI_SECURITY_CENTER_LOKI_URL: http://loki:3100
+    SECURITY_CENTER_ENABLED: "true"
+    SECURITY_CENTER_CROWDSEC_ENABLED: "true"
+    SECURITY_CENTER_MODSECURITY_ENABLED: "true"
+    SECURITY_CENTER_SHARING_CONFIG_PATH: /etc/crowdsec/config.yaml
+    SECURITY_CENTER_LOKI_URL: http://loki:3100
     NGINX_UI_SECURITY_AUDIT_ENABLED: "true"
   depends_on: [crowdsec, loki]
 services:

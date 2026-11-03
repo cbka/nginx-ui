@@ -62,6 +62,8 @@ func RegisterHostHandlers(conn *jsonrpc.Conn, pluginID string, permissions []str
 		return
 	}
 	granted := slices.Clone(permissions)
+	registerRuntimeHostHandlers(conn, pluginID, granted, backend)
+	registerClusterHostHandlers(conn, pluginID, granted, backend)
 
 	conn.Handle(protocol.MethodHostLog, func(ctx context.Context, params json.RawMessage) (any, error) {
 		var p protocol.HostLogParams

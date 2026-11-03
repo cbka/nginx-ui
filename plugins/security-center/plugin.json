@@ -1,0 +1,45 @@
+{
+  "id": "io.github.mctdatapool.security-center",
+  "name": "Security Center",
+  "version": "0.1.0",
+  "description": "Per-site ModSecurity OWASP CRS and CrowdSec security management",
+  "api_version": 1,
+  "server": {
+    "executables": {
+      "linux-amd64": "server/security-center"
+    },
+    "lifecycle": "resident"
+  },
+  "capabilities": [
+    "http"
+  ],
+  "permissions": [
+    "http.privileged",
+    "lifecycle.deactivate",
+    "nginx.transaction",
+    "cluster.sync",
+    "sites.read",
+    "network",
+    "nginx.config.read"
+  ],
+  "http": {
+    "listen": "unix"
+  },
+  "webapp": {
+    "bundle_path": "webapp/dist/main.js",
+    "style_path": "webapp/dist/style.css",
+    "shared": {
+      "vue": ">=3.5.44 <4",
+      "antdv-next": ">=1.7.1 <2"
+    }
+  },
+  "permission_reasons": {
+    "http.privileged": "Require an interactive administrator with a verified secure session.",
+    "lifecycle.deactivate": "Detach local WAF and CrowdSec enforcement before disable or uninstall.",
+    "nginx.transaction": "Apply per-site policies with atomic rollback, validation and reload.",
+    "cluster.sync": "Synchronize policies only with configured paired site peers.",
+    "sites.read": "Select existing managed virtual hosts.",
+    "network": "Read configured Loki events and communicate with the configured CrowdSec engine.",
+    "nginx.config.read": "Inspect existing Nginx security topology and adopt marked legacy settings."
+  }
+}

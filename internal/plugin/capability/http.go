@@ -50,6 +50,7 @@ const (
 var hostCredentialHeaders = []string{
 	"Authorization",
 	"Cookie",
+	"X-Secure-Session-ID",
 	"X-Node-ID",
 	"X-Node-Secret",
 	"Signature",
@@ -180,6 +181,7 @@ func serveHTTPUnix(c *gin.Context, h HTTPHost, id, subPath string) {
 			if upgrade {
 				stripHandshakeCredentials(req.URL)
 			}
+			stripSecureSessionQuery(req.URL)
 			// Credentials and any copy of the headers below the client sent
 			// must never reach the plugin, the host is their only source.
 			stripHostHeaders(req.Header)
@@ -254,10 +256,12 @@ func serveHTTPRPC(c *gin.Context, h HTTPHost, id, subPath string) {
 		return
 	}
 
+	cleanURL := *c.Request.URL
+	stripSecureSessionQuery(&cleanURL)
 	params := protocol.HTTPHandleParams{
 		Method:     c.Request.Method,
 		Path:       subPath,
-		Query:      c.Request.URL.RawQuery,
+		Query:      cleanURL.RawQuery,
 		Headers:    sanitizedHeaders(c.Request.Header),
 		BodyBase64: base64.StdEncoding.EncodeToString(body),
 		User:       currentUser(c),
@@ -355,4 +359,19 @@ func cosyError(err error) *cosy.Error {
 	}
 	errors.As(plugin.ErrPluginNotRunning, &cErr)
 	return cErr
+}
+
+// The host accepts this query fallback for secure sessions; never forward it.
+func stripSecureSessionQuery(u *url.URL) {
+	values := u.Query()
+	changed := false
+	for key := range values {
+		if strings.EqualFold(key, "X-Secure-Session-ID") || strings.EqualFold(key, "secure_session") {
+			values.Del(key)
+			changed = true
+		}
+	}
+	if changed {
+		u.RawQuery = values.Encode()
+	}
 }

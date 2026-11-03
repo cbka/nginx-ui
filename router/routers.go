@@ -26,7 +26,6 @@ import (
 	"github.com/0xJacky/Nginx-UI/api/pages"
 	pluginapi "github.com/0xJacky/Nginx-UI/api/plugin"
 	"github.com/0xJacky/Nginx-UI/api/public"
-	securitycenter "github.com/0xJacky/Nginx-UI/api/security_center"
 	"github.com/0xJacky/Nginx-UI/api/settings"
 	"github.com/0xJacky/Nginx-UI/api/sites"
 	snippetapi "github.com/0xJacky/Nginx-UI/api/snippet"
@@ -101,7 +100,7 @@ func InitRouter() {
 		// browser, even while the UI is managing a selected remote node.
 		local := root.Group("/", middleware.AuthRequired())
 		{
-			securitycenter.InitRouter(local)
+			pluginapi.InitReplicaRouter(local)
 			license.InitRouter(local)
 			llm.InitLocalRouter(local)
 			user.InitTokenRouter(local)

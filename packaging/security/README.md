@@ -42,7 +42,7 @@ See [deployment boundaries](../../docs/security-center.md).
    snippets reference individual complete policy files. Saving global defaults alone
    does not activate enforcement on unmanaged sites (see deployment guide).
    Mount persistent Nginx UI state and configure feature flags described in source
-   `settings/security_center.go`. Enable only after scoped admin testing.
+   `plugins/security-center/internal/center/config.go`. Enable only after scoped admin testing.
 
 No auto-generated credentials, automatic policy activation, deployment or upstream
 PR are performed by this recipe. CrowdSec scenario administration requires the
@@ -78,3 +78,14 @@ For the optional separate-engine reporting integration, review `engine-adapter/`
 and the deployment guide. `sharing-engine-smoke.sh` checks the official engine's
 configuration handling entirely offline; it requires the verified engine binary
 mounted at `/engine` and must run in a network-isolated disposable container.
+
+## Signed Security Center package
+
+After building the plugin executable and web bundle, run
+`packaging/security/package-plugin.sh`. It stages only the manifest, documentation,
+executable and browser assets. Signing keys live in ignored local lab state and
+are never included. Install through the normal API with
+`python3 packaging/security/local-cluster/install-plugin.py <package.tar.gz>`.
+This helper is restricted to the three local test endpoints. Developer mode is
+not required. The publisher is a locally trusted community publisher, not an
+official upstream signer.

@@ -1,6 +1,6 @@
 # Security Center: deployment and operational boundaries
 
-This fork adds a security administration surface; it does not automatically enable
+This fork adds a separately signed Security Center plugin; it does not automatically enable
 protection on existing proxies. There is no production deployment in this change.
 
 ## Runtime layout
@@ -11,7 +11,7 @@ and `cscli`. It does not apply patches to another binary. Build frontend assets
 and the Go binary using the repository release procedure first; place the resulting
 Linux amd64 binary at `packaging/security/artifacts/nginx-ui` (gitignored).
 
-Build context is the repository root. Supply `DEBIAN_BASE` as a verified
+The build helper stages an explicit allowlist of runtime files; local state and signing keys never enter its context. Supply `DEBIAN_BASE` as a verified
 `debian:trixie-slim@sha256:…` image digest and `DEBIAN_SNAPSHOT` as a verified Debian
 snapshot timestamp. Both are deliberately required: no floating base or silently
 moving apt repository is presented as reproducible. Record these inputs, the fork
@@ -52,7 +52,7 @@ variable alone does not establish that protection.
 
 ## ModSecurity wiring
 
-The global default policy lives at `/etc/nginx/security-center/modsecurity.conf`.
+The global default policy lives at `/etc/nginx/plugins-persistent/io.github.mctdatapool.security-center/modsecurity.conf`.
 Per-site management renders a complete effective policy for each managed server,
 including explicit overrides/exclusions and that site's audit path. **Do not include
 this full policy at `http {}` when using per-site policy files**: the Nginx connector
@@ -229,7 +229,7 @@ the Kubernetes downward API on **each** serving peer. The reader consumes
 `/var/log/nginx/error.log`, including uncompressed numeric rotations. Ordinary error
 lines are skipped; only structured events emitted by the pinned CrowdSec wrapper qualify.
 It resolves the site name from the matching server-owned
-`/etc/nginx/security-center/sites/<hash>.json` and validates the hash. HTTP Host
+`/etc/nginx/plugins-persistent/io.github.mctdatapool.security-center/sites/<hash>.json` and validates the hash. HTTP Host
 headers never determine security-event attribution.
 
 Persist `/usr/local/etc/nginx-ui/security-audit-state` per instance. It contains a
@@ -376,3 +376,12 @@ regression test invokes the real staging script with a fake Docker client and
 readable dummy lab credentials, checks the exact COPY input set, and verifies
 staging cleanup. Local cluster state, databases, credentials and logs never enter
 the build context.
+
+## Plugin lifecycle
+
+Build and install the signed package separately from the host image; see
+[plugin documentation](../plugins/security-center/README.md). Security routes are
+owned by the plugin and disappear when disabled. Explicit disable validates and
+reloads Nginx after removing managed site hooks; it retains desired configuration
+for re-enable. This action applies to the selected node. Other nodes must be
+disabled separately. A crash or host restart does not implicitly remove protection.

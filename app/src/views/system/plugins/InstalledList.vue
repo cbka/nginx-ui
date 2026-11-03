@@ -7,6 +7,7 @@ import gettext from '@/gettext'
 import { getErrorMessage } from '@/lib/http'
 import { usePluginLoader } from '@/plugin'
 import { enableReplacesText } from './conflicts'
+import { requiresDisableConfirmation } from './lifecycle'
 import InstalledPluginCard from './InstalledPluginCard.vue'
 import { usePluginInventory } from './inventory'
 import PermissionApprovalModal from './PermissionApprovalModal.vue'
@@ -197,7 +198,7 @@ async function requestDisable(plugin: PluginInfo) {
     togglingId.value = ''
   }
 
-  if (!usage || usage.total === 0) {
+  if (!requiresDisableConfirmation(plugin.permissions, usage?.total)) {
     await disablePlugin(plugin)
     return
   }
@@ -212,11 +213,16 @@ async function requestDisable(plugin: PluginInfo) {
     content: h('div', {
       style: { display: 'flex', flexDirection: 'column', gap: '8px' },
     }, [
-      h('p', {
-        style: { margin: 0 },
-      }, certificateUsageText(usage.total)),
-      h('p', secondary, formatUsagePreview(previewUsage(usage))),
-      h('p', secondary, $gettext('Renewal resumes when you turn it back on.')),
+      ...(plugin.permissions.includes('lifecycle.deactivate')
+        ? [h('p', secondary, $gettext('Disables this plugin and its managed functions on this node. This confirms deactivation on this node only; check other nodes separately when stopping protection across the cluster.'))]
+        : []),
+      ...(usage && usage.total > 0
+        ? [
+            h('p', { style: { margin: 0 } }, certificateUsageText(usage.total)),
+            h('p', secondary, formatUsagePreview(previewUsage(usage))),
+            h('p', secondary, $gettext('Renewal resumes when you turn it back on.')),
+          ]
+        : []),
     ]),
     okText: $gettext('Disable'),
     okButtonProps: { danger: true },
@@ -283,7 +289,9 @@ function confirmUninstall(plugin: PluginInfo) {
     title: $gettext('Uninstall %{name}?', {
       name: localizedPluginName(plugin, gettext.current),
     }),
-    content: $gettext('Its files, data and settings are removed from this node. Other nodes are not touched.'),
+    content: plugin.permissions.includes('lifecycle.deactivate')
+      ? $gettext('The plugin first deactivates its managed functions on this node. Its package is removed; persistent service configuration is retained for reinstall. Check other nodes separately.')
+      : $gettext('Its files, data and settings are removed from this node. Other nodes are not touched.'),
     okText: $gettext('Uninstall'),
     okButtonProps: { danger: true },
     cancelText: $gettext('Cancel'),

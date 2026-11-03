@@ -471,3 +471,19 @@ func TestNewHTTPHandlerKeepsQueryOfPlainRequests(t *testing.T) {
 
 	assert.Equal(t, "token=mine&x_node_id=3", <-queries)
 }
+
+func TestPluginNeverReceivesSecureSessionCredential(t *testing.T) {
+	header := http.Header{"X-Secure-Session-Id": []string{"host-secret"}, "Accept": []string{"application/json"}}
+	stripHostHeaders(header)
+	assert.Empty(t, header.Get("X-Secure-Session-ID"))
+	assert.Equal(t, "application/json", header.Get("Accept"))
+	dir := t.TempDir()
+	queries := make(chan string, 1)
+	startUnixHTTPServer(t, dir, func(w http.ResponseWriter, r *http.Request) { queries <- r.URL.RawQuery })
+	host := &fakeHTTPHost{info: enabledInfo(), manifest: httpManifest("unix"), dataDir: dir}
+	server := newUnixProxyServer(t, host)
+	resp, err := http.Get(server.URL + "/plugins/official.http/http/x?X-Secure-Session-ID=secret&secure_session=secret2&x=1")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, "x=1", <-queries)
+}
