@@ -6,7 +6,7 @@ function text(tag, value) {
   return element
 }
 function render(data) {
-  el('state').textContent = data.running ? 'Test läuft · nur lokaler Cluster' : 'Bereit / Test beendet'
+  el('state').textContent = `${data.running ? 'Test läuft' : 'Bereit / Test beendet'} · tatsächlich Ø ${data.achieved_rate || 0} Req/s · ${data.inflight || 0} gleichzeitig · ${data.elapsed_seconds || 0}s`
   el('start').disabled = pending || data.running
   el('stop').disabled = pending || !data.running
   el('stats').replaceChildren(...data.targets.map(node => {
@@ -38,7 +38,7 @@ async function command(path, data) {
 }
 el('controls').addEventListener('submit', event => {
   event.preventDefault()
-  command('/start', { target: el('target').value, profile: el('profile').value, rate: Number(el('rate').value), duration: Number(el('duration').value) })
+  command('/start', { concurrency: Number(el('concurrency').value), target: el('target').value, profile: el('profile').value, rate: Number(el('rate').value), duration: Number(el('duration').value) })
 })
 el('stop').addEventListener('click', () => command('/stop', {}))
 async function poll() {

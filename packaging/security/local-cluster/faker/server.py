@@ -1,5 +1,6 @@
 """Bounded local test traffic. Targets and payloads are intentionally not configurable."""
 import collections
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import http.client
 import json
 import math
@@ -19,22 +20,32 @@ PROFILES = {
 PROFILES['mix'] = sum(PROFILES.values(), ())
 
 
+def finite_nonnegative(value):
+    try:
+        return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value) and value >= 0
+    except OverflowError:
+        return False
+
+
 def validate(data):
-    if not isinstance(data, dict) or set(data) - {'rate', 'duration', 'profile', 'target'}:
-        raise ValueError('Only rate, duration, profile and target are accepted')
+    if not isinstance(data, dict) or set(data) - {'rate', 'duration', 'profile', 'target', 'concurrency'}:
+        raise ValueError('Only rate, duration, profile, target and concurrency are accepted')
     rate = data.get('rate', 1)
     duration = data.get('duration', 60)
     profile = data.get('profile', 'normal')
-    if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not math.isfinite(rate) or not 0.1 <= rate <= 20:
-        raise ValueError('Rate must be between 0.1 and 20 requests/second')
-    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or not 1 <= duration <= 300:
-        raise ValueError('Duration must be between 1 and 300 seconds')
+    if not finite_nonnegative(rate):
+        raise ValueError('Rate must be a finite non-negative number; 0 means maximum throughput')
+    if not finite_nonnegative(duration):
+        raise ValueError('Duration must be a finite non-negative number; 0 means until stopped')
     if not isinstance(profile, str) or profile not in PROFILES:
         raise ValueError('Unknown profile')
     target = data.get('target', 'all')
     if target not in ('all', *TARGETS):
         raise ValueError('Unknown fixed target')
-    return rate, duration, profile, target
+    concurrency = data.get('concurrency', 16)
+    if type(concurrency) is not int or not 1 <= concurrency <= 256:
+        raise ValueError('Concurrency must be 1..256 workers (process resource bound)')
+    return rate, duration, profile, target, concurrency
 
 
 def send_request(target, path):
@@ -47,7 +58,7 @@ def send_request(target, path):
         response = connection.getresponse()
         # Do not follow redirects or retain response content / request credentials.
         status = str(response.status)
-        response.read(4096)
+        # Status/headers suffice; close without downloading the response body.
         return status, round((time.monotonic() - start) * 1000, 1)
     except (OSError, http.client.HTTPException):
         return 'network-error', round((time.monotonic() - start) * 1000, 1)
@@ -65,9 +76,13 @@ class Generator:
         self.log = collections.deque(maxlen=200)
         self.stats = {}
         self.config = {}
+        self.started_at = 0
+        self.ended_at = 0
+        self.inflight = 0
+        self.peak_inflight = 0
 
     def start(self, data):
-        rate, duration, profile, target = validate(data)
+        rate, duration, profile, target, concurrency = validate(data)
         with self.lock:
             if self.running:
                 raise ValueError('A test is already running')
@@ -75,34 +90,66 @@ class Generator:
             self.stop_event.clear()
             self.log.clear()
             self.stats = {node: {'count': 0, 'status': {}, 'latency_total': 0, 'latency_max': 0} for node in TARGETS}
-            self.config = {'rate': rate, 'duration': duration, 'profile': profile, 'target': target}
-            self.thread = threading.Thread(target=self.run, args=(rate, duration, profile, target), daemon=True)
+            self.config = {'rate': rate, 'duration': duration, 'profile': profile, 'target': target, 'concurrency': concurrency}
+            self.started_at = time.monotonic()
+            self.ended_at = 0
+            self.inflight = 0
+            self.peak_inflight = 0
+            self.thread = threading.Thread(target=self.run, args=(rate, duration, profile, target, concurrency), daemon=True)
             self.thread.start()
 
-    def run(self, rate, duration, profile, target):
-        targets = TARGETS if target == 'all' else (target,)
-        deadline = time.monotonic() + duration
-        index = 0
+    def execute(self, target, path):
+        # No work starts after stop, even if a just-submitted thread was not scheduled.
+        if self.stop_event.is_set():
+            return
         try:
-            while not self.stop_event.is_set() and time.monotonic() < deadline:
-                started = time.monotonic()
-                target = targets[index % len(targets)]
-                paths = PROFILES[profile]
-                # Every node receives every profile payload across cycles.
-                path = paths[(index // len(targets)) % len(paths)]
-                status, latency = self.sender(target, path)
-                with self.lock:
-                    entry = self.stats[target]
-                    entry['count'] += 1
-                    entry['status'][status] = entry['status'].get(status, 0) + 1
-                    entry['latency_total'] += latency
-                    entry['latency_max'] = max(entry['latency_max'], latency)
-                    self.log.append({'time': time.strftime('%H:%M:%S'), 'node': target, 'path': path, 'status': status, 'latency_ms': latency})
-                index += 1
-                # No catch-up bursts after slow requests. Limit is global, not per node.
-                self.stop_event.wait(max(0, min(deadline - time.monotonic(), 1 / rate - (time.monotonic() - started))))
+            status, latency = self.sender(target, path)
+        except Exception:
+            status, latency = 'network-error', 0
+        with self.lock:
+            entry = self.stats[target]
+            entry['count'] += 1
+            entry['status'][status] = entry['status'].get(status, 0) + 1
+            entry['latency_total'] += latency
+            entry['latency_max'] = max(entry['latency_max'], latency)
+            self.log.append({'time': time.strftime('%H:%M:%S'), 'node': target, 'path': path, 'status': status, 'latency_ms': latency})
+
+    def run(self, rate, duration, profile, target, concurrency):
+        targets = TARGETS if target == 'all' else (target,)
+        deadline = self.started_at + duration if duration else math.inf
+        pending = set()
+        index = 0
+        next_send = self.started_at
+        try:
+            with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix='faker-request') as pool:
+                while not self.stop_event.is_set() and time.monotonic() < deadline:
+                    pending = {future for future in pending if not future.done()}
+                    with self.lock:
+                        self.inflight = len(pending)
+                    if len(pending) >= concurrency:
+                        wait(pending, timeout=.05, return_when=FIRST_COMPLETED)
+                        continue
+                    now = time.monotonic()
+                    delay = min(next_send, deadline) - now
+                    if delay > 0:
+                        self.stop_event.wait(min(delay, 86400))
+                        continue
+                    target = targets[index % len(targets)]
+                    paths = PROFILES[profile]
+                    path = paths[(index // len(targets)) % len(paths)]
+                    pending.add(pool.submit(self.execute, target, path))
+                    with self.lock:
+                        self.inflight = len(pending)
+                        self.peak_inflight = max(self.peak_inflight, self.inflight)
+                    index += 1
+                    # Global pacing, no catch-up bursts, no unbounded executor queue.
+                    next_send = time.monotonic() + 1 / rate if rate else time.monotonic()
+                for future in pending:
+                    future.cancel()
         finally:
             with self.lock:
+                self.inflight = 0
+                self.ended_at = time.monotonic()
                 self.running = False
 
     def stop(self):
@@ -111,7 +158,9 @@ class Generator:
     def snapshot(self):
         with self.lock:
             stats = {node: {**entry, 'status': dict(entry['status']), 'latency_avg': round(entry['latency_total'] / max(1, entry['count']), 1)} for node, entry in self.stats.items()}
-            return {'running': self.running, 'config': dict(self.config), 'stats': stats, 'log': list(reversed(self.log)), 'targets': list(TARGETS)}
+            elapsed = max(0, (self.ended_at or time.monotonic()) - self.started_at) if self.started_at else 0
+            completed = sum(item['count'] for item in self.stats.values())
+            return {'elapsed_seconds': round(elapsed, 1), 'achieved_rate': round(completed / elapsed, 1) if elapsed else 0, 'inflight': self.inflight, 'peak_inflight': self.peak_inflight, 'running': self.running, 'config': dict(self.config), 'stats': stats, 'log': list(reversed(self.log)), 'targets': list(TARGETS)}
 
 
 GENERATOR = Generator()
@@ -163,7 +212,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(404, {'error': 'Not found'})
             self.reply(200, GENERATOR.snapshot())
         except (ValueError, TimeoutError):
-            self.reply(400, {'error': 'Invalid request or limits; rate 0.1–20/s, duration 1–300s, known profile; no overlapping runs'})
+            self.reply(400, {'error': 'Invalid request or limits; finite rate/duration >=0, concurrency1..256, fixed target/profile; no overlapping runs'})
 
     def log_message(self, *_args):
         pass

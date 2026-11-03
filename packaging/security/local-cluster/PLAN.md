@@ -49,3 +49,16 @@ owns integration, browser checks and operator documentation. No concurrent build
 - Acceptance: all browser self-checks green, both CrowdSec API reads successful,
   correct empty-state text, focused partial-failure regression tests, rebuilt
   embedded UI/image, and unchanged normal200/XSS403 on each node.
+
+## Higher-load faker
+- Remove the 20 req/s and 300-second product limits. Rate zero means maximum
+  throughput; duration zero means run until stopped.
+- Add real concurrent requests with bounded in-flight work, global pacing and
+  measured throughput. Retain fixed local targets, no redirects and CSRF checks.
+- Acceptance: tests for high requested rates, concurrency/stop and bounded work;
+  actual browser run above 20 req/s followed by Stop; no errors/restart loops.
+- Faker resource budget becomes 256 MiB, two CPUs, 512 PIDs, no swap. Aggregate
+  lab hard RAM becomes 3840 MiB (3.75 GiB); workload rate has no 20 req/s ceiling.
+- Browser acceptance: requested 500 req/s mixed traffic for five seconds, measured
+  476.8 req/s and 2,385 requests (795 per node), no network errors. Run ended;
+  generator left stopped. Independent concurrency/target-safety review passed.

@@ -32,11 +32,15 @@ Open the generator, choose a node or all three, profile, rate and duration, then
 start. Nothing starts automatically. Stop cancels further sends; an in-flight
 request can take up to its two-second network timeout.
 
-Profiles are normal, SQL injection, XSS, scanner and mixed traffic. The global
-limit is 20 requests/second and runs last at most 300 seconds. Slow requests reduce
-throughput; there are no catch-up bursts. The UI shows response statuses and
-latencies per node and the last 200 requests. It accepts no arbitrary target URL
-or payload and follows no redirects.
+Profiles are normal, SQL injection, XSS, scanner and mixed traffic. There is no
+20-request/second or 300-second ceiling. A rate of zero requests maximum throughput;
+a duration of zero runs until stopped. Choose parallel workers (default 16, up to
+256 in-flight requests) to use available capacity. The rate setting is a global
+target, not a throughput guarantee. The generator has no unbounded request queue.
+The UI shows measured throughput, response statuses, latencies per node and the
+last 200 requests. It accepts no arbitrary target URL or payload and follows no
+redirects. Docker still bounds the generator to 256 MiB RAM, no swap, two CPUs
+and 512 processes/threads to protect the local machine.
 
 The shared test host is `security-demo.local`. The generator sets that Host header;
 local website links use the test site's default virtual host. SQL injection and

@@ -37,10 +37,12 @@ class SafetyTests(unittest.TestCase):
             self.assertEqual(connection.return_value.request.call_count, 1)
 
     def test_limits_and_profiles(self):
-        self.assertEqual(validate({}), (1, 60, 'normal', 'all'))
-        for data in ({'rate': 21}, {'rate': 0}, {'rate': True}, {'rate': float('nan')}, {'duration': 301}, {'duration': 0}, {'duration': float('inf')}, {'profile': 'arbitrary'}, {'url': 'https://example.com'}, {'target': 'example.com'}, []):
+        self.assertEqual(validate({}), (1, 60, 'normal', 'all', 16))
+        for data in ({'rate': -1}, {'rate': True}, {'rate': float('nan')}, {'rate': 10 ** 400}, {'duration': 10 ** 400}, {'duration': -1}, {'concurrency': 257}, {'concurrency': True}, {'duration': float('inf')}, {'profile': 'arbitrary'}, {'url': 'https://example.com'}, {'target': 'example.com'}, []):
             with self.assertRaises(ValueError):
                 validate(data)
+        self.assertEqual(validate({'rate': 100000, 'duration': 7200})[:2], (100000, 7200))
+        self.assertEqual(validate({'rate': 0, 'duration': 0})[:2], (0, 0))
         for profile in PROFILES:
             self.assertEqual(validate({'profile': profile})[2], profile)
 
@@ -71,6 +73,29 @@ class SafetyTests(unittest.TestCase):
         generator.stop()
         generator.thread.join(.5)
         self.assertEqual(targets, ['node2'])
+
+    def test_unlimited_mode_has_bounded_inflight_and_no_backlog(self):
+        release = threading.Event()
+        started = threading.Event()
+        calls = []
+        def sender(*_):
+            calls.append(True)
+            if len(calls) == 4:
+                started.set()
+            release.wait(1)
+            return '200', 1
+        generator = Generator(sender)
+        generator.start({'rate': 0, 'duration': 0, 'concurrency': 4})
+        self.assertTrue(started.wait(1))
+        time.sleep(.06)
+        self.assertEqual(len(calls), 4)
+        self.assertLessEqual(generator.snapshot()['peak_inflight'], 4)
+        generator.stop()
+        release.set()
+        generator.thread.join(.5)
+        self.assertFalse(generator.thread.is_alive())
+        self.assertEqual(len(calls), 4)
+        self.assertEqual(generator.snapshot()['inflight'], 0)
 
     def test_rate_is_global_and_nodes_round_robin(self):
         calls = []

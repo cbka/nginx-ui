@@ -118,10 +118,10 @@ services:
     container_name: nginx-security-local-faker
     restart: unless-stopped
     logging: *logging
-    cpus: 0.5
-    mem_limit: 128m
-    memswap_limit: 128m
-    pids_limit: 64
+    cpus: 2.0
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 512
     networks: [lab]
     labels: {codex.task: nginx-security-local-cluster}
   gateway:
