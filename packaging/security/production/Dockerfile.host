@@ -1,6 +1,10 @@
 # Add a verified fork host build to the production runtime with module parity.
 ARG PRODUCTION_BASE
 FROM ${PRODUCTION_BASE}
+# Preserve the original runtime log-rotation command used by the host scheduler.
+RUN apt-get update && apt-get install -y --no-install-recommends --no-remove logrotate=3.22.0-1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && dpkg-query -W > /usr/local/share/nginx-ui-security/packages.lock
 COPY packaging/security/artifacts/production-3.0.0-security.1/nginx-ui /usr/local/bin/nginx-ui
 RUN chmod 0755 /usr/local/bin/nginx-ui
 ARG HOST_VERSION
