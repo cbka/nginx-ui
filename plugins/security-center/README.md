@@ -62,3 +62,15 @@ unrelated peers applied the same configuration.
 The current signed package targets Linux amd64 and requires this fork's generic
 privileged HTTP, transaction and lifecycle extensions. The paired runtime provides
 Nginx, ModSecurity/OWASP CRS, Lua and cscli. Other platforms are not packaged yet.
+
+### Activation and settings
+
+The host plugin switch is authoritative for management availability. The legacy
+`SECURITY_CENTER_ENABLED` flag does not need to be set for this resident plugin.
+Engine flags (`SECURITY_CENTER_MODSECURITY_ENABLED` and
+`SECURITY_CENTER_CROWDSEC_ENABLED`) still describe operator-provisioned integrations;
+the plugin switch does not provision either engine or configure a website.
+The plugin settings drawer links to Security Center. Missing engines and central
+logging are shown explicitly instead of issuing requests to disabled APIs.
+`events_configured` only indicates a configured Loki endpoint, not reachability
+or proof that events are being collected.

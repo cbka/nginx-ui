@@ -75,6 +75,7 @@ const wafValid = computed(() => {
     && Number.isInteger(config.inbound_threshold) && config.inbound_threshold >= 1 && config.inbound_threshold <= 1000
     && Number.isInteger(config.outbound_threshold) && config.outbound_threshold >= 1 && config.outbound_threshold <= 1000
 })
+const canWaf = computed(() => !!status.value?.enabled && !!status.value?.modsecurity_enabled)
 const canCrowdsec = computed(() => !!status.value?.enabled && !!status.value?.crowdsec_enabled)
 
 async function loadCrowdsec() {
@@ -123,14 +124,29 @@ async function refresh() {
   applied.value = undefined
   try {
     status.value = await security.status()
+    if (!canWaf.value) {
+      sites.value = []
+      selectedSite.value = ''
+      eventDraft.value = undefined
+      siteDirty.value = false
+      siteError.value = ''
+      waf.value = undefined
+      wafError.value = ''
+    }
+    if (!canCrowdsec.value) {
+      decisions.value = []
+      scenarios.value = []
+      decisionsError.value = ''
+      scenariosError.value = ''
+    }
     await Promise.all([
-      status.value.enabled
+      canWaf.value
         ? loadSites()
         : Promise.resolve(),
       canCrowdsec.value
         ? loadCrowdsec()
         : Promise.resolve(),
-      status.value.enabled && status.value.modsecurity_enabled
+      canWaf.value
         ? loadWaf()
         : Promise.resolve(),
     ])
@@ -289,10 +305,15 @@ onMounted(refresh)
     <AAlert v-if="!canManageSecurity(settings.node.id)" type="info" show-icon :message="$gettext('Security Center manages the local controller only. Select the local node to view or change its security settings.')" />
     <AAlert v-if="error" type="error" show-icon :message="error" />
     <ASpin :spinning="loading">
-      <AAlert v-if="status && !status.enabled" type="info" show-icon :message="$gettext('Security Center is not enabled on this node. Configure the server integration first.')" />
+      <AAlert v-if="status && !status.enabled" type="info" show-icon :message="$gettext('The Security Center backend is not active on this node. An installed plugin alone does not confirm that protection is running.')" />
+      <AAlert v-if="status?.enabled" type="info" show-icon :message="$gettext('Security Center is running. Engine integrations and website enforcement must be configured separately; this does not confirm that traffic is protected.')" class="section-gap" />
+      <AAlert v-if="status?.enabled && !canCrowdsec" type="warning" show-icon :message="$gettext('CrowdSec integration is unavailable. Decisions and scenarios cannot be inspected or managed on this node.')" class="section-gap" />
+      <AAlert v-if="status?.enabled && !canWaf" type="warning" show-icon :message="$gettext('ModSecurity integration is unavailable. Website policies and WAF settings cannot be inspected or managed on this node.')" class="section-gap" />
+      <AAlert v-if="canWaf && !status?.runtime_integration_verified" type="warning" show-icon :message="$gettext('ModSecurity configuration integration has not been verified. Saved settings do not establish that the WAF is inspecting requests.')" class="section-gap" />
       <ATabs v-if="status?.enabled" v-model:active-key="activeTab">
         <ATabPane key="events" :tab="$gettext('Cluster events')">
-          <SecurityEvents :sites="sites" @exclude="draftFromEvent($event, 'exception')" @block="draftFromEvent($event, 'block')" @ban="prepareEventBan" />
+          <AAlert v-if="!status.events_configured" type="info" show-icon :message="$gettext('Central event logging is not configured. Event availability is unknown; this does not mean no security events occurred.')" />
+          <SecurityEvents v-else :sites="sites" @exclude="draftFromEvent($event, 'exception')" @block="draftFromEvent($event, 'block')" @ban="prepareEventBan" />
         </ATabPane>
         <ATabPane key="crowdsec" :tab="$gettext('CrowdSec')">
           <AAlert v-if="!canCrowdsec" type="info" show-icon :message="$gettext('CrowdSec is not configured on this node.')" />
@@ -377,13 +398,13 @@ onMounted(refresh)
         </ATabPane>
         <ATabPane key="modsecurity" :tab="$gettext('WAF & website protection')">
           <AFormItem :label="$gettext('Configuration scope')">
-            <ASelect v-model:value="selectedSite" :options="scopeOptions" show-search option-filter-prop="label" :disabled="busy || loading || siteBusy || unsaved" />
+            <ASelect v-model:value="selectedSite" :options="scopeOptions" show-search option-filter-prop="label" :disabled="!canWaf || busy || loading || siteBusy || unsaved" />
           </AFormItem>
           <p v-if="unsaved" class="muted">
             {{ $gettext('Apply or discard changes before switching scope.') }}
           </p>
           <AAlert v-if="siteError" type="warning" show-icon :message="siteError" class="section-gap" />
-          <SiteProtection v-if="selectedSite" :key="`${selectedSite}:${eventDraft?.revision ?? 0}`" :name="selectedSite" :draft="eventDraft?.site === selectedSite ? eventDraft : undefined" @busy="siteBusy = $event" @dirty="siteDirty = $event" />
+          <SiteProtection v-if="canWaf && selectedSite" :key="`${selectedSite}:${eventDraft?.revision ?? 0}`" :name="selectedSite" :draft="eventDraft?.site === selectedSite ? eventDraft : undefined" @busy="siteBusy = $event" @dirty="siteDirty = $event" />
           <template v-else>
             <AAlert v-if="!status.modsecurity_enabled" type="info" show-icon :message="$gettext('ModSecurity is not configured on this node.')" />
             <template v-else>

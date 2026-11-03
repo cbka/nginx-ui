@@ -30,12 +30,16 @@ test('installed IIFE registers its own Vue page and can be disabled and re-enabl
   expect(!!definition).toBe(true)
   expect(() => definition!.setup({})).toThrow('secure plugin request support')
   const routes: { path: string, component: unknown }[] = []
+  const settingsPanels: unknown[] = []
   const registry = {
     host: { nodeId: 0 },
     request: () => Promise.resolve({}),
+    registerSettingsPanel: (component: unknown) => settingsPanels.push(component),
     registerRoute: (route: { path: string, component: unknown }) => routes.push(route),
   }
   definition!.setup(registry)
+  expect(settingsPanels.length).toBe(1)
+  expect(typeof settingsPanels[0]).toBe('object')
   expect(routes[0].path).toBe('security-center')
   expect(typeof routes[0].component).toBe('object')
   definition!.teardown()

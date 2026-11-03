@@ -2,6 +2,7 @@ package security_center
 
 import (
 	"bytes"
+	"encoding/json"
 	center "github.com/0xJacky/Nginx-UI/plugins/security-center/internal/center"
 	"github.com/gin-gonic/gin"
 	"net/http/httptest"
@@ -21,5 +22,41 @@ func TestPluginRoutesRejectInvalidInputsWithoutCommands(t *testing.T) {
 		if w.Code != 400 {
 			t.Fatalf("%s returned %d", v.path, w.Code)
 		}
+	}
+}
+
+func TestStatusReportsEventsConfiguredWithoutClaimingVerification(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previous := service
+	t.Cleanup(func() { service = previous })
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+		url     string
+		want    bool
+	}{
+		{"missing", true, "", false},
+		{"whitespace", true, " \t\n", false},
+		{"configured", true, " https://loki.example.invalid ", true},
+		{"disabled", false, "https://loki.example.invalid", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SECURITY_CENTER_LOKI_URL", tc.url)
+			SetService(center.New(center.Config{Enabled: tc.enabled}))
+			r := gin.New()
+			r.GET("/status", Status)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest("GET", "/status", nil))
+			var result map[string]any
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &result) != nil {
+				t.Fatal("status response failed")
+			}
+			if result["events_configured"] != tc.want {
+				t.Fatal("incorrect events configuration status")
+			}
+			if _, exists := result["events_verified"]; exists {
+				t.Fatal("configuration must not claim event integration verification")
+			}
+		})
 	}
 }

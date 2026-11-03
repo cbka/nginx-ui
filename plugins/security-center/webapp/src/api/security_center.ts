@@ -13,6 +13,7 @@ export interface SecurityStatus {
   enabled: boolean
   crowdsec_enabled: boolean
   modsecurity_enabled: boolean
+  events_configured: boolean
   scenario_changes_enabled: boolean
   runtime_integration_verified: boolean
 }

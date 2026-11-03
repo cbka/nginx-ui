@@ -32,6 +32,15 @@ type application struct {
 	initializedDone chan struct{}
 }
 
+// The host starts this process only for an enabled plugin. Engine availability
+// remains an independent operator configuration; plugin activation grants no
+// new WAF or CrowdSec enforcement by itself.
+func activePluginConfig() center.Config {
+	c := center.EnvironmentConfig()
+	c.Enabled = true
+	return c
+}
+
 func (a *application) start(ctx context.Context) error {
 	var info struct {
 		InstanceID    string `json:"instance_id"`
@@ -44,7 +53,7 @@ func (a *application) start(ctx context.Context) error {
 	if info.InstanceID == "" || !filepath.IsAbs(info.PersistentDir) || !filepath.IsAbs(info.NginxConfDir) {
 		return errors.New("invalid host runtime information")
 	}
-	c := center.EnvironmentConfig()
+	c := activePluginConfig()
 	c.ModSecurityPath = filepath.Join(info.PersistentDir, "modsecurity.conf")
 	if err := os.MkdirAll(info.PersistentDir, 0750); err != nil {
 		return err

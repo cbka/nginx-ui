@@ -45,3 +45,23 @@ func TestActivationWaitsForInitializationAndRejectsFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPluginLifecycleEnablesManagementWithoutEnablingEngines(t *testing.T) {
+	t.Setenv("SECURITY_CENTER_MODSECURITY_ENABLED", "false")
+	t.Setenv("SECURITY_CENTER_CROWDSEC_ENABLED", "false")
+	for _, legacy := range []string{"", "false", "true"} {
+		t.Setenv("SECURITY_CENTER_ENABLED", legacy)
+		c := activePluginConfig()
+		if !c.Enabled {
+			t.Fatal("host-enabled plugin must not depend on legacy enabled environment flag")
+		}
+		if c.ModSecurityEnabled || c.CrowdSecEnabled {
+			t.Fatal("plugin activation must not enable security engines")
+		}
+	}
+	t.Setenv("SECURITY_CENTER_MODSECURITY_ENABLED", "true")
+	c := activePluginConfig()
+	if !c.ModSecurityEnabled || c.CrowdSecEnabled {
+		t.Fatal("independent operator engine configuration must be retained")
+	}
+}
