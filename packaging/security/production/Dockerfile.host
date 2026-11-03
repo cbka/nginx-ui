@@ -1,0 +1,7 @@
+# Add a verified fork host build to the production runtime with module parity.
+ARG PRODUCTION_BASE
+FROM ${PRODUCTION_BASE}
+COPY packaging/security/artifacts/production-3.0.0-security.1/nginx-ui /usr/local/bin/nginx-ui
+RUN chmod 0755 /usr/local/bin/nginx-ui
+ARG HOST_VERSION
+LABEL org.opencontainers.image.version="${HOST_VERSION}"

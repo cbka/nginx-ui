@@ -1,0 +1,52 @@
+#!/bin/sh
+# Remove only the unused Nchan loader; keep a regular tombstone for native sync.
+set -eu
+root=${1:-/etc/nginx}
+# Existing production trees must not be rewritten implicitly. Enable this only
+# for the independent cloned PVCs used by the new deployment.
+if [ "${NGINX_UI_ALLOW_NCHAN_TOMBSTONE:-false}" != true ]; then
+    for file in "$root"/nginx.conf "$root"/modules-enabled/*.conf; do
+        [ -e "$file" ] || [ -L "$file" ] || continue
+        if [ -L "$file" ]; then
+            case "$(readlink "$file")" in
+                */mod-nchan.conf|mod-nchan.conf|*/mod-http-nchan.conf|mod-http-nchan.conf)
+                    echo 'Nchan loader requires explicit cloned-state tombstone approval.' >&2
+                    exit 1 ;;
+            esac
+        fi
+        if [ -f "$file" ] && grep -Eq '^[[:space:]]*load_module[[:space:]].*ngx_nchan_module[.]so' "$file"; then
+            echo 'Nchan loader requires explicit cloned-state tombstone approval.' >&2
+            exit 1
+        fi
+    done
+    exit 0
+fi
+for file in "$root"/nginx.conf "$root"/modules-enabled/*.conf; do
+    [ -e "$file" ] || [ -L "$file" ] || continue
+    if [ -L "$file" ]; then
+        case "$(readlink "$file")" in
+            */mod-nchan.conf|mod-nchan.conf|*/mod-http-nchan.conf|mod-http-nchan.conf)
+                temp=$(mktemp "${file}.XXXXXX")
+                if [ -f "$file" ]; then
+                    awk '/^[ \t]*load_module[ \t]+["\047]?([^;"\047 \t]*\/)?ngx_nchan_module[.]so["\047]?[ \t]*;[ \t]*(#.*)?$/ { print "# Nchan disabled: managed image policy."; next } { print }' "$file" > "$temp"
+                else
+                    printf '# Nchan disabled: worker-start assertion can leave a shared-memory lock held.\n' > "$temp"
+                fi
+                chmod 0644 "$temp"
+                mv -f "$temp" "$file"
+                ;;
+        esac
+        continue
+    fi
+    [ -f "$file" ] || continue
+    temp=$(mktemp "${file}.XXXXXX")
+    # Match the entire directive, not a filename substring or unrelated module.
+    awk '/^[ \t]*load_module[ \t]+["\047]?([^;"\047 \t]*\/)?ngx_nchan_module[.]so["\047]?[ \t]*;[ \t]*(#.*)?$/ { print "# Nchan disabled: managed image policy."; next } { print }' "$file" > "$temp"
+    if cmp -s "$file" "$temp"; then
+        rm "$temp"
+    else
+        chmod --reference="$file" "$temp"
+        chown --reference="$file" "$temp"
+        mv -f "$temp" "$file"
+    fi
+done

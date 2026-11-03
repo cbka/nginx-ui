@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+# Retain the existing workload command, but use the fork supervisor configuration.
+/usr/local/sbin/nginx-ui-disable-nchan
+exec /usr/local/sbin/entrypoint.sh "$@"

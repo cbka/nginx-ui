@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+# Preserve the existing app.ini RestartCmd without modifying its database/config.
+/usr/local/sbin/nginx-ui-disable-nchan
+exec /usr/local/sbin/restart.sh "$@"

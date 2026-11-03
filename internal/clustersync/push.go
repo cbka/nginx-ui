@@ -136,6 +136,16 @@ func pushConfigFilesIndividually(ctx context.Context, node nodeRef, files []Conf
 
 // siteItem replicates one site together with its enabled state.
 func siteItem(name, content, namespace, postAction string, enabled, overwrite bool) item {
+	state := siteStateDisabled
+	if enabled {
+		state = siteStateEnabled
+	}
+	return siteStateItem(name, content, namespace, postAction, state, overwrite)
+}
+
+// siteStateItem keeps maintenance separate from disabled. Both lack a normal
+// enabled symlink, but disabling a maintenance site removes its public guard.
+func siteStateItem(name, content, namespace, postAction string, state siteState, overwrite bool) item {
 	return item{
 		kind: KindSite,
 		name: name,
@@ -150,7 +160,12 @@ func siteItem(name, content, namespace, postAction string, enabled, overwrite bo
 				return err
 			}
 
-			return applyEnabledState(ctx, node, "/api/sites/"+name, enabled)
+			if state == siteStateMaintenance {
+				// The long-standing maintenance endpoint is supported by older
+				// nodes too. Never fall back to enable/disable on any failure.
+				return node.post(ctx, "/api/sites/"+name+"/maintenance", nil)
+			}
+			return applyEnabledState(ctx, node, "/api/sites/"+name, state == siteStateEnabled)
 		},
 	}
 }

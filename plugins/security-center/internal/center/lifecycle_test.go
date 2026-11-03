@@ -124,10 +124,40 @@ func TestMigrateLegacyPreservesOwnershipAndTemplates(t *testing.T) {
 }
 func TestDeactivateRejectsUnownedGlobalEnforcement(t *testing.T) {
 	s := siteService(t)
+	if _, err := s.ApplySite(context.Background(), "a.conf", inheritedPolicy()); err != nil {
+		t.Fatal(err)
+	}
 	s.Run = func(context.Context, string, ...string) ([]byte, error) {
 		return []byte("# configuration file /etc/nginx/nginx.conf:\nhttp { access_by_lua_file /unowned.lua; }\n"), nil
 	}
 	if s.Deactivate(context.Background()) == nil {
 		t.Fatal("must not claim security is off with unowned enforcement")
+	}
+}
+
+func TestDeactivateWithoutOwnedSitesLeavesUnownedLuaUntouched(t *testing.T) {
+	s := siteService(t)
+	path, err := s.sitePath("a.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("server { listen 80; access_by_lua_file /existing-auth.lua; }\n")
+	if err := os.WriteFile(path, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s.Run = func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("no owned sites: must not inspect or reload unrelated Nginx configuration")
+		return nil, nil
+	}
+	s.Transaction = func(context.Context, []Change) error {
+		t.Fatal("no owned sites: must not submit a configuration transaction")
+		return nil
+	}
+	if err := s.Deactivate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(content) {
+		t.Fatal("deactivation changed the existing Lua authentication configuration", err)
 	}
 }

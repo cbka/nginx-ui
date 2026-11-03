@@ -86,15 +86,20 @@ func (s *Service) Deactivate(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expected = nil
+	states, err := s.states()
+	if err != nil {
+		return err
+	}
+	// An installed plugin with no owned sites has nothing to detach. Existing
+	// authentication/security hooks belong to the operator, not this lifecycle.
+	if len(states) == 0 {
+		return nil
+	}
 	dump, err := s.Run(ctx, s.Config.NginxPath, "-T")
 	if err != nil {
 		return err
 	}
 	if err = s.checkTopology(dump); err != nil {
-		return err
-	}
-	states, err := s.states()
-	if err != nil {
 		return err
 	}
 	changes := []fileChange{}

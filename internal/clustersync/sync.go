@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/0xJacky/Nginx-UI/internal/nginx"
 	"github.com/0xJacky/Nginx-UI/model"
@@ -198,6 +199,11 @@ func collectSiteItems(namespace *model.Namespace, overwrite bool) ([]item, []Con
 	items := make([]item, 0, len(sites))
 	files := make([]ConfigFile, 0, len(sites))
 	for _, siteModel := range sites {
+		// Generated maintenance guards are state of their parent site, never
+		// independently enabled/disabled sites (legacy catalogs may list them).
+		if strings.HasSuffix(filepath.Base(siteModel.Path), maintenanceConfigSuffix) {
+			continue
+		}
 		content, err := os.ReadFile(siteModel.Path)
 		if err != nil {
 			logger.Debugf("cluster sync skips unreadable site %s: %v", siteModel.Path, err)
@@ -210,12 +216,12 @@ func collectSiteItems(namespace *model.Namespace, overwrite bool) ([]item, []Con
 			Name:    name,
 			Content: string(content),
 		})
-		items = append(items, siteItem(
+		items = append(items, siteStateItem(
 			name,
 			string(content),
 			namespaceName(lo.Ternary(namespace != nil, namespace, siteModel.Namespace)),
 			postSyncAction(siteModel.Namespace),
-			siteEnabled(siteModel),
+			siteDeploymentState(siteModel),
 			overwrite,
 		))
 	}
@@ -275,6 +281,28 @@ func postSyncAction(namespace *model.Namespace) string {
 		return model.PostSyncActionReloadNginx
 	}
 	return namespace.PostSyncAction
+}
+
+type siteState string
+
+const (
+	siteStateEnabled        siteState = "enabled"
+	siteStateDisabled       siteState = "disabled"
+	siteStateMaintenance    siteState = "maintenance"
+	maintenanceConfigSuffix           = "_nginx_ui_maintenance"
+)
+
+func siteDeploymentState(siteModel *model.Site) siteState {
+	// A controller's concrete maintenance guard takes precedence over its
+	// ordinary enabled link and the legacy boolean remote intent.
+	name := filepath.Base(siteModel.Path)
+	if enabledLinkExists("sites-enabled", name+maintenanceConfigSuffix) {
+		return siteStateMaintenance
+	}
+	if siteEnabled(siteModel) {
+		return siteStateEnabled
+	}
+	return siteStateDisabled
 }
 
 // siteEnabled reports the deployment intent: remote namespaces keep it in the
