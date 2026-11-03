@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { canManageSecurity, normalizeDecisions, normalizeScenarios, parseExcludedRules } from '@/views/security_center/normalize'
+import { canManageSecurity, crowdsecListResult, normalizeDecisions, normalizeScenarios, parseExcludedRules } from '@/views/security_center/normalize'
 import { canApplySharing, sharingConfiguredValue } from '@/views/security_center/sharing'
 import { canSyncSavedPolicy, cloneSitePolicy, exceptionFromEvent, inheritedSitePolicy, templateChanges, validExactPath, validException, validSitePolicy, validTemplatePolicy } from '@/views/security_center/sitePolicy'
 
@@ -228,4 +228,17 @@ describe('Community signal sharing configuration', () => {
     expect(canApplySharing({ ...configured, configured: false }, true)).toBe(false)
     expect(canApplySharing({ ...configured, enabled: null }, true)).toBe(false)
   })
+})
+
+test('CrowdSec partial failures do not mark a healthy empty decision list unavailable', () => {
+  const healthy = {
+    status: 'fulfilled' as const,
+    value: { items: [] },
+  }
+  const failed = { status: 'rejected' as const, reason: 'scenario capability unavailable' }
+  const format = (error: unknown) => String(error)
+  expect(crowdsecListResult(healthy, normalizeDecisions, format)).toEqual({ items: [], error: '' })
+  expect(crowdsecListResult(failed, normalizeScenarios, format)).toEqual({ items: [], error: 'scenario capability unavailable' })
+  expect(crowdsecListResult(healthy, normalizeScenarios, format)).toEqual({ items: [], error: '' })
+  expect(crowdsecListResult(failed, normalizeDecisions, format).error).not.toBe('')
 })

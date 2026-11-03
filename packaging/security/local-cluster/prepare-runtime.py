@@ -9,6 +9,8 @@ if state.exists(): raise SystemExit('state already exists; refusing to overwrite
 state.mkdir(mode=0o700)
 engine=state/'crowdsec';cfg=engine/'config';cfg.mkdir(parents=True)
 (engine/'data').mkdir();(cfg/'hub').mkdir();(cfg/'bouncers').mkdir()
+# LAPI-only offline lab: explicitly empty local hub, no scenarios installed.
+(cfg/'hub/.index.json').write_text('{}\n')
 shutil.copy2(a.engine_binary,engine/'engine');os.chmod(engine/'engine',0o755)
 password=secrets.token_hex(24);key=secrets.token_hex(24)
 secretfile=root/'runtime-secrets.json'
@@ -67,6 +69,7 @@ try:
    for name in ['access.log','error.log','security-events.jsonl']:(logs/name).touch()
    shutil.copytree(temp+'/nginx',node/'nginx',symlinks=True)
    nginx=node/'nginx';shutil.copy2(root/'config/nginx.conf',nginx/'nginx.conf')
+   for folder in ('conf.d','streams-available','streams-enabled'):(nginx/folder).mkdir(exist_ok=True)
    for existing in (nginx/'sites-enabled').iterdir():existing.unlink()
    shutil.copy2(root/'config/demo.conf',nginx/'sites-available/security-demo.conf')
    (nginx/'sites-enabled/security-demo.conf').symlink_to('/etc/nginx/sites-available/security-demo.conf')

@@ -105,3 +105,16 @@ export function parseExcludedRules(value: string): number[] | undefined {
 export function canManageSecurity(nodeId: number): boolean {
   return nodeId === 0
 }
+
+// A failed optional CLI capability must not mark another healthy list unavailable.
+export function crowdsecListResult<T>(result: PromiseSettledResult<{ items: unknown }>, normalize: (input: unknown) => T[], errorMessage: (error: unknown) => string): { items: T[], error: string } {
+  return result.status === 'fulfilled'
+    ? {
+        items: normalize(result.value.items),
+        error: '',
+      }
+    : {
+        items: [],
+        error: errorMessage(result.reason),
+      }
+}

@@ -302,18 +302,20 @@ request checks.
 ### Local integrated build verification (2026-11-03)
 
 A deliberately retained local build artifact is `codex/nginx-ui-security:fork-20261103`,
-image ID `sha256:937c25758cc4b6bd752a13b53975c693732c3fd7ec6ab069538546b36e21fdbc`.
+image ID `sha256:9c02388832a8f27beeb001c9571617cfd0b52abb58707d00031415aff7872ee8`.
 It contains the actual fork binary with embedded frontend (binary SHA256
-`8ece4790e6edce8fc9e92e81c23c05d9d43d25db973c167d711856198fba8546`).
-This is a local review/test artifact, not a published or deployed image.
+`ea04480c9fb310c24a03a116cc97755747bc3586a7886cc2a520f1314f40d522`).
+This is a local review/test artifact deployed only in the isolated local lab,
+not published or deployed to production.
 
 The template- and community-control-inclusive final image passed supervisor startup, embedded homepage
 delivery, anonymous security, template and sharing API rejection (403), and exact SHA256
 verification of the served SecurityCenter frontend asset including template and community-reporting UI.
 The unchanged runtime previously passed real service-generated policy tests, JSON/XML
 200/403/400 request checks, per-vhost CrowdSec event attribution and timestamp checks,
-and 18 Python normalization/cursor tests. Temporary test containers and image tags
-were removed; no task volumes or networks remain. The image and ignored compiled
+and 18 Python normalization/cursor tests. Temporary smoke-test containers and obsolete unused image tags
+were removed; no temporary smoke-test volumes or networks remain. The persistent
+local lab and its networks remain intentionally available. The image and ignored compiled
 binary remain intentionally available for review. Deployment prerequisites and
 external-plugin limitations above still apply.
 
@@ -358,3 +360,19 @@ credentials remain, explicit pull settings remain unchanged, and an invalid bool
 is rejected. No external reports can leave that container. `cscli config show` shows
 the merged input before engine defaults; omitted sharing appears null there, while
 the engine loader's documented source sets its default to true.
+
+The final partial-error UI correction is deployed to all three local lab nodes,
+with their existing accounts and policy state preserved. Each node serves the
+final SecurityCenter asset with SHA256
+`e8358b11540bb841804068db26237fb5bbdd80d7fa1bb59533aafd633826e0cf`
+and still accepts normal requests (200) while blocking the XSS test (403).
+The lab engine and gateway intentionally retain their earlier runtime image
+`sha256:937c25758cc4b6bd752a13b53975c693732c3fd7ec6ab069538546b36e21fdbc`;
+they do not execute the UI binary and remain active consumers, so that image must
+not be deleted as unused.
+
+The image build stages an explicit allowlist of Dockerfile inputs only. A
+regression test invokes the real staging script with a fake Docker client and
+readable dummy lab credentials, checks the exact COPY input set, and verifies
+staging cleanup. Local cluster state, databases, credentials and logs never enter
+the build context.

@@ -9,8 +9,12 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 test -s "$root/packaging/security/artifacts/nginx-ui"
 context=$(mktemp -d)
 trap 'rm -rf "$context"' EXIT HUP INT TERM
-mkdir -p "$context/packaging"
-cp -a "$root/packaging/security" "$context/packaging/"
+# Explicit allowlist: never copy local-cluster state, credentials, logs or test data.
+mkdir -p "$context/packaging/security/artifacts"
+for file in Dockerfile audit_reader.py audit_normalizer.py security-access.lua nginx_ui_security_events.lua crowdsec-init.conf entrypoint.sh restart.sh smoke.sh supervisord.conf modsecurity-base.conf loader.conf initial-policy.conf; do
+    cp "$root/packaging/security/$file" "$context/packaging/security/$file"
+done
+cp "$root/packaging/security/artifacts/nginx-ui" "$context/packaging/security/artifacts/nginx-ui"
 # Legacy builder enforces these resource limits per build container; no compilation here.
 DOCKER_BUILDKIT=0 docker build --memory=3g --memory-swap=3g \
     --label codex.task=nginx-ui-security-runtime \

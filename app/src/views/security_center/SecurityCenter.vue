@@ -6,7 +6,7 @@ import security from '@/api/security_center'
 import { getErrorMessage } from '@/lib/http'
 import { useSettingsStore } from '@/pinia'
 import CommunitySharing from './CommunitySharing.vue'
-import { canManageSecurity, normalizeDecisions, normalizeScenarios, parseExcludedRules } from './normalize'
+import { canManageSecurity, crowdsecListResult, normalizeDecisions, normalizeScenarios, parseExcludedRules } from './normalize'
 import SecurityEvents from './SecurityEvents.vue'
 import SiteProtection from './SiteProtection.vue'
 
@@ -25,7 +25,8 @@ const status = ref<SecurityStatus>()
 const loading = ref(false)
 const busy = ref(false)
 const error = ref('')
-const crowdsecError = ref('')
+const decisionsError = ref('')
+const scenariosError = ref('')
 const wafError = ref('')
 const decisions = ref<Decision[]>([])
 const scenarios = ref<Scenario[]>([])
@@ -78,24 +79,18 @@ const wafValid = computed(() => {
 const canCrowdsec = computed(() => !!status.value?.enabled && !!status.value?.crowdsec_enabled)
 
 async function loadCrowdsec() {
-  crowdsecError.value = ''
+  decisionsError.value = ''
+  scenariosError.value = ''
   const results = await Promise.allSettled([
     security.decisions(),
     security.scenarios(),
   ])
-  if (results[0].status === 'fulfilled')
-    decisions.value = normalizeDecisions(results[0].value.items)
-  else
-    decisions.value = []
-  if (results[1].status === 'fulfilled')
-    scenarios.value = normalizeScenarios(results[1].value.items)
-  else
-    scenarios.value = []
-  crowdsecError.value = results.flatMap(result => result.status === 'rejected'
-    ? [
-        getErrorMessage(result.reason),
-      ]
-    : []).join(' · ')
+  const decisionResult = crowdsecListResult(results[0], normalizeDecisions, getErrorMessage)
+  const scenarioResult = crowdsecListResult(results[1], normalizeScenarios, getErrorMessage)
+  decisions.value = decisionResult.items
+  decisionsError.value = decisionResult.error
+  scenarios.value = scenarioResult.items
+  scenariosError.value = scenarioResult.error
 }
 
 async function loadWaf() {
@@ -303,9 +298,9 @@ onMounted(refresh)
         <ATabPane key="crowdsec" :tab="$gettext('CrowdSec')">
           <AAlert v-if="!canCrowdsec" type="info" show-icon :message="$gettext('CrowdSec is not configured on this node.')" />
           <template v-else>
-            <AAlert v-if="crowdsecError" type="error" show-icon :message="crowdsecError" class="section-gap" />
             <CommunitySharing />
             <h3>{{ $gettext('Global active decisions') }}</h3>
+            <AAlert v-if="decisionsError" type="error" show-icon :message="decisionsError" class="section-gap" />
             <p class="muted">
               {{ $gettext('Up to 100 local alerts are shown. Central API and simulated decisions are excluded. This is not a complete blocklist.') }}
             </p>
@@ -324,7 +319,7 @@ onMounted(refresh)
                   </tr>
                   <tr v-if="!visibleDecisions.length">
                     <td colspan="6">
-                      {{ crowdsecError ? $gettext('Decision list unavailable or incomplete.') : $gettext('No matching decisions.') }}
+                      {{ decisionsError ? $gettext('Decision list unavailable or incomplete.') : $gettext('No matching decisions.') }}
                     </td>
                   </tr>
                 </tbody>
@@ -348,6 +343,7 @@ onMounted(refresh)
               </AButton>
             </AForm>
             <h3>{{ $gettext('Global detection scenarios') }}</h3>
+            <AAlert v-if="scenariosError" type="error" show-icon :message="scenariosError" class="section-gap" />
             <p class="muted">
               {{ $gettext('Install scenarios by their exact CrowdSec Hub name. Rule source files and credentials are not edited here.') }}
             </p>
@@ -372,7 +368,7 @@ onMounted(refresh)
                   </tr>
                   <tr v-if="!scenarios.length">
                     <td colspan="4">
-                      {{ crowdsecError ? $gettext('Scenario list unavailable or incomplete.') : $gettext('No scenarios returned.') }}
+                      {{ scenariosError ? $gettext('Scenario list unavailable or incomplete.') : $gettext('No scenarios returned.') }}
                     </td>
                   </tr>
                 </tbody>

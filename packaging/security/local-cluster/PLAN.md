@@ -37,3 +37,15 @@ owns integration, browser checks and operator documentation. No concurrent build
 - Browser Start/Stop verified; generator left stopped, no background traffic.
 - Eight intended services and two lab networks retained, zero restart loops;
   aggregate hard RAM 3712 MiB, no container swap. No temporary test containers left.
+
+## Browser error correction
+- Reproduced scenarios HTTP 502 with a healthy empty decisions HTTP 200. Cause:
+  deliberately offline LAPI-only lab lacked an explicit empty Hub index.
+- Initialize an empty offline catalogue, preserve existing state, and show each
+  CrowdSec list's errors independently. A failed scenario read must not label a
+  successful empty decision list unavailable.
+- Complete expected conf.d/stream directory/includes in fresh and current lab
+  configurations. Validate with nginx -t before reload; never suppress self-checks.
+- Acceptance: all browser self-checks green, both CrowdSec API reads successful,
+  correct empty-state text, focused partial-failure regression tests, rebuilt
+  embedded UI/image, and unchanged normal200/XSS403 on each node.
