@@ -4,16 +4,19 @@ import { expect, test } from 'bun:test'
 
 test('installed IIFE registers its own Vue page and can be disabled and re-enabled', () => {
   let definition: { setup: (registry: unknown) => void, teardown: () => void } | undefined
+  const provider = { name: 'SharedAppProvider' }
   const vue = new Proxy({}, {
-    get: (_target, property) => property === 'defineComponent'
-      ? (component: unknown) => component
-      : () => ({}),
+    get: (_target, property) => property === 'h'
+      ? (component: unknown, props: unknown, slots: unknown) => ({ component, props, slots })
+      : property === 'defineComponent'
+        ? (component: unknown) => component
+        : () => ({}),
   })
   const source = readFileSync(new URL('../dist/main.js', import.meta.url), 'utf8')
   const runtime = {
     shared: {
       vue,
-      antdvNext: {},
+      antdvNext: { App: provider },
       antdvIcons: {},
       gettext: {
         $gettext: (text: string) => text,
@@ -42,6 +45,10 @@ test('installed IIFE registers its own Vue page and can be disabled and re-enabl
   expect(typeof settingsPanels[0]).toBe('object')
   expect(routes[0].path).toBe('security-center')
   expect(typeof routes[0].component).toBe('object')
+  const root = routes[0].component as { setup: () => () => { component: unknown, slots: { default: () => { component: unknown } } } }
+  const rendered = root.setup()()
+  expect(rendered.component).toBe(provider)
+  expect(typeof rendered.slots.default().component).toBe('object')
   definition!.teardown()
   definition!.setup(registry)
   expect(routes.length).toBe(2)

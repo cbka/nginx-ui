@@ -88,7 +88,7 @@ watch(() => settings.node.id, load, { immediate: true })
       <p>{{ $gettext('Configuration status does not verify actual runtime delivery to the community.') }}</p>
       <AAlert v-if="!loading && (!status?.configured || !status.editable)" type="warning" show-icon :message="$gettext('The engine configuration adapter is unavailable or read-only. No enabled/disabled runtime state is assumed.')" />
       <AForm layout="vertical">
-        <AFormItem :label="$gettext('Desired community sharing setting')">
+        <AFormItem :label="$gettext('Desired community sharing setting')" :help="$gettext('Global für die verbundene Engine. Aktiviert das Senden von Angriffssignalen an CrowdSec; CrowdSec bewertet sie für gemeinsame Sperrlisten. Nicht jede blockierte Anfrage wird gemeldet oder veröffentlicht. Deaktivieren hebt lokale Sperren nicht auf.')">
           <ASwitch :checked="desired === true" :disabled="configured === null || !status?.editable || loading || saving || !canManageSecurity(settings.node.id)" @change="value => desired = !!value" />
           <span class="desired-label">{{ desired === null ? $gettext('Unknown') : desired ? $gettext('Enabled') : $gettext('Disabled') }}</span>
         </AFormItem>

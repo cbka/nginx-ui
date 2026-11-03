@@ -12,6 +12,16 @@ const { modal } = App.useApp()
 const settings = useSettingsStore()
 const state = ref<SiteSecurityState>()
 const policy = ref<SiteSecurityPolicy>()
+const paranoiaSelection = computed<number | string>({
+  get: () => policy.value?.paranoia_level ?? 'inherit',
+  set: value => {
+    if (policy.value) {
+      policy.value.paranoia_level = value === 'inherit'
+        ? null
+        : Number(value)
+    }
+  },
+})
 const exclusions = ref('')
 const blockedPaths = ref('')
 let draftConsumed = false
@@ -213,43 +223,60 @@ watch(() => props.name, () => {
         </p>
       </div>
       <SecurityTemplates v-model:notice="templateNotice" :name="name" :policy="payload" :disabled="state.replica || syncing || saving || loading" @draft="templateDraft" />
-      <AForm layout="vertical" :disabled="state.replica || syncing" @finish="apply">
+      <details class="field-guide section-gap">
+        <summary>{{ $gettext('Welche Einstellungen passen zu meiner Website?') }}</summary>
+        <p>{{ $gettext('Zum Einstieg: zunächst nur beobachten (Detection only), mit Paranoia-Level 1. Normale Abläufe wie Anmeldung, Suche und Upload testen und die Ereignisse prüfen. Erst danach gezielt auf Blockieren umstellen.') }}</p>
+        <p>{{ $gettext('Vererben übernimmt die globalen Einstellungen einschließlich späterer Änderungen. Ein eigener Wert gilt nur für diese Website. Die Anzeige „Effective saved policy“ zeigt den gespeicherten Stand, nicht den ungespeicherten Entwurf.') }}</p>
+        <p>{{ $gettext('Speichern wirkt zunächst auf diesem Knoten. Anschließend die gespeicherte Richtlinie synchronisieren und die Bestätigung jedes Zielknotens prüfen.') }}</p>
+      </details>
+      <AForm layout="vertical" :disabled="state.replica || syncing" @submit="apply">
         <div class="policy-grid">
-          <AFormItem :label="$gettext('WAF mode for this website')">
+          <AFormItem :label="$gettext('WAF mode for this website')" :help="$gettext('Die Web-Firewall prüft Anfragen auf Angriffsmuster. Detection only protokolliert ohne WAF-Sperre; On prüft und blockiert; Off schaltet diese Prüfung aus. CrowdSec kann auch bei Detection only weiterhin sperren.')">
             <ASelect v-model:value="policy.modsecurity" :options="[{ value: 'inherit', label: $gettext('Inherit global setting') }, { value: 'DetectionOnly', label: $gettext('Detection only') }, { value: 'On', label: $gettext('On — inspect and block') }, { value: 'Off', label: $gettext('Off — no inspection') }]" />
           </AFormItem>
-          <AFormItem :label="$gettext('CrowdSec enforcement for this website')">
+          <AFormItem :label="$gettext('CrowdSec enforcement for this website')" :help="$gettext('Wendet vorhandene CrowdSec-Entscheidungen auf Besucher dieser Website an. Aus deaktiviert hier die Durchsetzung, löscht aber keine zentralen Entscheidungen und ändert keine Community-Meldungen.')">
             <ASelect v-model:value="policy.crowdsec" :options="[{ value: 'inherit', label: $gettext('Inherit global setting') }, { value: 'on', label: $gettext('Enforce CrowdSec decisions') }, { value: 'off', label: $gettext('Do not enforce CrowdSec decisions') }]" />
           </AFormItem>
-          <AFormItem :label="$gettext('Paranoia level override')" :help="$gettext('Leave empty to inherit the global value.')">
-            <AInputNumber v-model:value="policy.paranoia_level" :min="1" :max="4" :precision="0" :placeholder="$gettext('Inherit')" />
+          <AFormItem :label="$gettext('Prüfstrenge (Paranoia-Level)')" :help="$gettext('1 ist der empfohlene Einstieg. 2 bis 4 ergänzen strengere Regeln und können mehr legitime Anfragen fälschlich erkennen. „Globalen Wert übernehmen“ folgt den zentralen Einstellungen.')">
+            <ASelect
+              v-model:value="paranoiaSelection" :options="[
+                { value: 'inherit', label: $gettext('Globalen Wert übernehmen') },
+                { value: 1, label: $gettext('1 – Basis: empfohlener Einstieg') },
+                { value: 2, label: $gettext('2 – Erweitert: mehr Fehlalarme möglich') },
+                { value: 3, label: $gettext('3 – Streng: gezielte Ausnahmen nötig') },
+                { value: 4, label: $gettext('4 – Sehr streng: hoher Abstimmungsaufwand') },
+              ]"
+            />
           </AFormItem>
-          <AFormItem :label="$gettext('Inbound threshold override')" :help="$gettext('Leave empty to inherit the global value.')">
+          <AFormItem :label="$gettext('Sperrschwelle für Anfragen (Inbound)')" :help="$gettext('CRS-Regeltreffer sammeln Punkte pro Anfrage. Ab dieser Summe kann On blockieren. Üblicher Startwert: 5; höher lässt mehr durch, niedriger blockiert früher. Leer = globalen Wert übernehmen.')">
             <AInputNumber v-model:value="policy.inbound_threshold" :min="1" :max="1000" :precision="0" :placeholder="$gettext('Inherit')" />
           </AFormItem>
-          <AFormItem :label="$gettext('Outbound threshold override')" :help="$gettext('Leave empty to inherit the global value.')">
+          <AFormItem :label="$gettext('Sperrschwelle für Antworten (Outbound)')" :help="$gettext('Punkteschwelle für geprüfte Serverantworten, zum Beispiel bei erkannten Datenlecks. Üblicher Startwert: 4. Das ist keine Risikostufe. Leer = globalen Wert übernehmen.')">
             <AInputNumber v-model:value="policy.outbound_threshold" :min="1" :max="1000" :precision="0" :placeholder="$gettext('Inherit')" />
           </AFormItem>
         </div>
-        <p class="muted">
-          {{ $gettext('This CrowdSec setting controls request enforcement only. Decisions and detection scenarios remain global and can still protect other websites.') }}
-        </p>
-        <AFormItem :label="$gettext('Additional rule exclusions for this website')" :validate-status="ids === undefined ? 'error' : undefined" :help="ids === undefined ? $gettext('Use up to 200 OWASP CRS rule IDs (900000–999999), separated by commas or spaces.') : $gettext('These IDs are added to global exclusions. Clearing this list does not remove global exclusions.')">
+        <details class="field-guide section-gap">
+          <summary>{{ $gettext('Wie hängen Prüfstrenge und Punkteschwelle zusammen?') }}</summary>
+          <p>{{ $gettext('Das Paranoia-Level bestimmt, welche zusätzlichen Regeln prüfen. Die Schwelle bestimmt, ab welcher gesammelten Punktzahl die WAF blockiert. Eine höhere Schwelle macht die Prüfung nicht strenger. In Detection only wird weiterhin nur protokolliert.') }}</p>
+          <p>{{ $gettext('Bei Fehlalarmen möglichst eine passende Ausnahme für den betroffenen Pfad oder Parameter anlegen, statt die Schwellen für die gesamte Website zu erhöhen.') }}</p>
+          <a href="https://coreruleset.org/docs/2-how-crs-works/2-2-paranoia_levels/" target="_blank" rel="noopener noreferrer">{{ $gettext('OWASP CRS: Prüfstrenge und Punktesystem erklärt (Englisch)') }}</a>
+        </details>
+        <AFormItem :label="$gettext('Additional rule exclusions for this website')" :validate-status="ids === undefined ? 'error' : undefined" :help="ids === undefined ? $gettext('Use up to 200 OWASP CRS rule IDs (900000–999999), separated by commas or spaces.') : $gettext('Diese CRS-Regeln werden auf der gesamten Website übersprungen, zusätzlich zu globalen Ausnahmen. IDs aus einem geprüften Ereignis übernehmen. Leer entfernt nur lokale Ausnahmen; gezielte Ausnahmen unten sind enger begrenzt.')">
           <ATextarea v-model:value="exclusions" :rows="3" placeholder="942100" />
         </AFormItem>
         <h3>{{ $gettext('Scoped rule exceptions') }}</h3>
         <p class="muted">
-          {{ $gettext('Exclude a CRS rule for an exact path, a specific query/body parameter, or both. Parameter names refer to ARGS only; header exceptions are not supported. Paths omit query strings.') }}
+          {{ $gettext('Eine Ausnahme überspringt nur die gewählte Regel im angegebenen Bereich. Pfad und Parameter zusammen begrenzen sie am stärksten. Alle anderen Regeln bleiben aktiv. Nur nach Prüfung eines legitimen, fälschlich erkannten Aufrufs verwenden.') }}
         </p>
         <div v-for="(exception, index) in policy.exceptions" :key="index" class="exception-row">
           <div class="policy-grid">
-            <AFormItem :label="$gettext('Rule ID')">
+            <AFormItem :label="$gettext('Rule ID')" :help="$gettext('Nummer der auslösenden CRS-Regel aus den Ereignissen, z. B. 942100. Keine Ereignis-ID.')">
               <AInputNumber v-model:value="exception.rule_id" :min="900000" :max="999999" :precision="0" />
             </AFormItem>
-            <AFormItem :label="$gettext('Exact path (optional)')">
+            <AFormItem :label="$gettext('Exact path (optional)')" :help="$gettext('Nur dieser exakte Pfad, ohne Domain oder ?Suchparameter. Keine Platzhalter. Leer: der angegebene Parameter ist auf allen Pfaden ausgenommen.')">
               <AInput v-model:value="exception.path" placeholder="/api/search" :maxlength="512" />
             </AFormItem>
-            <AFormItem :label="$gettext('ARGS parameter (optional)')">
+            <AFormItem :label="$gettext('Anfrageparameter (ARGS, optional)')" :help="$gettext('Name eines von ModSecurity als ARGS erkannten URL- oder Formularparameters, z. B. q. Kein Wert, kein ARGS:-Präfix und kein HTTP-Header. Leer: die Regel wird am angegebenen Pfad vollständig ausgenommen.')">
               <AInput v-model:value="exception.parameter" placeholder="q" :maxlength="100" />
             </AFormItem>
           </div>
@@ -267,7 +294,7 @@ watch(() => props.name, () => {
           {{ $gettext('Add scoped exception') }}
         </AButton>
         <h3>{{ $gettext('Custom exact-path block rules') }}</h3>
-        <AFormItem :label="$gettext('Paths to deny with HTTP 403')" :help="$gettext('One exact path per line, without a query string. Applies to this website only. DetectionOnly logs matches without blocking; Off disables inspection.')" :validate-status="payload?.blocked_paths.some(path => !validExactPath(path)) ? 'error' : undefined">
+        <AFormItem :label="$gettext('Paths to deny with HTTP 403')" :help="$gettext('Ein exakter Pfad pro Zeile, z. B. /private/export, ohne Domain, Suchparameter oder Platzhalter. Sperrt nur hier und nur bei WAF On mit HTTP 403. Detection only protokolliert; Off prüft nicht. Ein Verzeichnis sperrt nicht automatisch seine Unterpfade.')" :validate-status="payload?.blocked_paths.some(path => !validExactPath(path)) ? 'error' : undefined">
           <ATextarea v-model:value="blockedPaths" :rows="3" placeholder="/private/export" />
         </AFormItem>
         <AAlert v-if="payload && !valid" type="warning" show-icon :message="$gettext('The draft contains invalid values. Check rule IDs, path and parameter formats, duplicate paths and the maximum of 100 exceptions or path rules.')" class="section-gap" />
@@ -313,6 +340,10 @@ watch(() => props.name, () => {
 </template>
 
 <style scoped>
+.field-guide { padding: 0; color: var(--ant-color-text); line-height: 1.6; }
+.field-guide summary { cursor: pointer; font-weight: 500; padding: 6px 0; }
+.field-guide summary:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: 3px; }
+.field-guide p { max-width: 90ch; margin: 8px 0; }
 .peer-result { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--ant-color-border-secondary); }
 .sync-section code { overflow-wrap: anywhere; }
 .exception-row { padding: 16px; border: 1px solid var(--ant-color-border-secondary); border-radius: 8px; margin-bottom: 12px; }

@@ -180,6 +180,8 @@ async function mutate(action: () => Promise<unknown>, reload: () => Promise<void
 }
 
 function addBan() {
+  if (busy.value || loading.value || !ban.ip.trim() || !ban.duration.trim() || !ban.reason.trim())
+    return
   modal.confirm({
     title: $gettext('Block this IP address?'),
     content: $gettext('This may immediately interrupt access, including your own connection. IP: %{ip}', { ip: ban.ip }),
@@ -299,6 +301,14 @@ onMounted(refresh)
         {{ $gettext('Refresh') }}
       </AButton>
     </template>
+    <details class="quick-help section-gap">
+      <summary>{{ $gettext('Wie beginne ich? Schutz in drei Schritten') }}</summary>
+      <ol>
+        <li>{{ $gettext('Website auswählen, ModSecurity zunächst nur beobachten lassen und mit Paranoia-Level 1 beginnen.') }}</li>
+        <li>{{ $gettext('Normale Abläufe testen: Anmeldung, Uploads und APIs. Treffer in den Ereignissen prüfen und belegte Fehlalarme möglichst eng ausnehmen.') }}</li>
+        <li>{{ $gettext('Danach bei Bedarf blockieren. Speichern wirkt lokal; anschließend die gespeicherte Website-Richtlinie synchronisieren und jeden Peer bestätigen lassen. CrowdSec-Sperren separat prüfen.') }}</li>
+      </ol>
+    </details>
     <p class="muted">
       {{ $gettext('Manage CrowdSec decisions and OWASP CRS protection on the local controller. Edits apply locally; synchronize saved website policies to configured peers explicitly. Configured does not mean every website is protected.') }}
     </p>
@@ -346,15 +356,15 @@ onMounted(refresh)
               </table>
             </div>
             <h3>{{ $gettext('Block an IP address') }}</h3>
-            <AForm layout="vertical" @finish="addBan">
+            <AForm layout="vertical" @submit="addBan">
               <div class="form-grid">
-                <AFormItem :label="$gettext('IP address')">
+                <AFormItem :label="$gettext('IP address')" :help="$gettext('Einzelne IPv4- oder IPv6-Adresse. Die Sperre gilt für alle Websites mit aktivierter CrowdSec-Durchsetzung, nicht nur für einen VHost.')">
                   <AInput v-model:value="ban.ip" placeholder="192.0.2.10" :maxlength="45" />
                 </AFormItem>
-                <AFormItem :label="$gettext('Duration')">
+                <AFormItem :label="$gettext('Duration')" :help="$gettext('Gültigkeitsdauer, z. B. 15m für 15 Minuten oder 4h für vier Stunden. Danach läuft die Sperre automatisch ab.')">
                   <AInput v-model:value="ban.duration" placeholder="4h" :maxlength="20" />
                 </AFormItem>
-                <AFormItem :label="$gettext('Reason')">
+                <AFormItem :label="$gettext('Reason')" :help="$gettext('Kurze Begründung für spätere Nachvollziehbarkeit, z. B. wiederholte Anmeldeversuche. Keine Passwörter oder personenbezogenen Inhalte eintragen.')">
                   <AInput v-model:value="ban.reason" :maxlength="200" />
                 </AFormItem>
               </div>
@@ -365,11 +375,11 @@ onMounted(refresh)
             <h3>{{ $gettext('Global detection scenarios') }}</h3>
             <AAlert v-if="scenariosError" type="error" show-icon :message="scenariosError" class="section-gap" />
             <p class="muted">
-              {{ $gettext('Install scenarios by their exact CrowdSec Hub name. Rule source files and credentials are not edited here.') }}
+              {{ $gettext('Szenarien erkennen Angriffsmuster in den gesammelten Logs, z. B. viele fehlgeschlagene Anmeldungen. Sie gelten für die zentrale Engine. Die Installation allein garantiert weder passende Eingangsdaten noch eine Sperre auf jeder Website. Verwende den exakten Namen aus dem CrowdSec Hub, z. B. crowdsecurity/http-probing.') }}
             </p>
             <AAlert v-if="!status.scenario_changes_enabled" type="info" show-icon :message="$gettext('Scenario changes are unavailable until a CrowdSec reload command is configured.')" class="section-gap" />
             <div class="inline-form section-gap">
-              <AInput v-model:value="scenarioName" placeholder="crowdsecurity/ssh-bf" :aria-label="$gettext('Scenario name')" />
+              <AInput v-model:value="scenarioName" placeholder="crowdsecurity/http-probing" :aria-label="$gettext('Scenario name')" />
               <AButton :disabled="busy || loading || !status.scenario_changes_enabled || !scenarioName.trim()" @click="changeScenario(scenarioName, 'install')">
                 {{ $gettext('Install') }}
               </AButton>
@@ -397,7 +407,7 @@ onMounted(refresh)
           </template>
         </ATabPane>
         <ATabPane key="modsecurity" :tab="$gettext('WAF & website protection')">
-          <AFormItem :label="$gettext('Configuration scope')">
+          <AFormItem :label="$gettext('Configuration scope')" :help="$gettext('Globale Vorgaben gelten für Websites, die sie erben. Wähle eine Website, um nur deren Schutz anzupassen.')">
             <ASelect v-model:value="selectedSite" :options="scopeOptions" show-search option-filter-prop="label" :disabled="!canWaf || busy || loading || siteBusy || unsaved" />
           </AFormItem>
           <p v-if="unsaved" class="muted">
@@ -410,29 +420,29 @@ onMounted(refresh)
             <template v-else>
               <AAlert v-if="wafError" type="error" show-icon :message="wafError" class="section-gap" />
               <AAlert v-if="applied" type="warning" show-icon :message="applied" class="section-gap" />
-              <AForm v-if="waf" layout="vertical" @finish="saveWaf">
+              <AForm v-if="waf" layout="vertical" @submit="saveWaf">
                 <AAlert type="info" show-icon :message="$gettext('These are configured settings. Protection also requires the ModSecurity connector and CRS includes to be enabled in each relevant website.')" class="section-gap" />
                 <AFormItem :label="$gettext('Global CrowdSec enforcement default')" :help="$gettext('Applies to managed websites that inherit the global value. This does not start or stop the CrowdSec engine.')">
                   <ASwitch v-model:checked="waf.crowdsec_enabled" />
                 </AFormItem>
                 <div class="form-grid">
-                  <AFormItem :label="$gettext('Inspection mode')">
+                  <AFormItem :label="$gettext('Inspection mode')" :help="$gettext('Zum Einstieg: nur beobachten. ModSecurity protokolliert dann Treffer ohne zu blockieren. CrowdSec-Sperren bleiben unabhängig davon wirksam. Aus beendet nur die ModSecurity-Prüfung.')">
                     <ASelect v-model:value="waf.mode" :options="[{ value: 'DetectionOnly', label: $gettext('Detection only — log without blocking') }, { value: 'On', label: $gettext('On — inspect and block') }, { value: 'Off', label: $gettext('Off — no inspection') }]" />
                   </AFormItem>
-                  <AFormItem :label="$gettext('OWASP paranoia level')">
-                    <ASelect v-model:value="waf.paranoia_level" :options="[1, 2, 3, 4].map(value => ({ value, label: String(value) }))" />
+                  <AFormItem :label="$gettext('OWASP paranoia level')" :help="$gettext('Prüfstrenge: Stufe 1 ist der empfohlene Einstieg. Höhere Stufen aktivieren zusätzliche Regeln und können mehr berechtigte Anfragen beanstanden. Erst Fehlalarme prüfen, dann erhöhen.')">
+                    <ASelect v-model:value="waf.paranoia_level" :options="[{ value: 1, label: $gettext('1 – Basis (Einstieg)') }, { value: 2, label: $gettext('2 – Erweitert') }, { value: 3, label: $gettext('3 – Streng') }, { value: 4, label: $gettext('4 – Sehr streng') }]" />
                   </AFormItem>
-                  <AFormItem :label="$gettext('Inbound anomaly threshold')">
+                  <AFormItem :label="$gettext('Inbound anomaly threshold')" :help="$gettext('Punktegrenze für eingehende Anfragen, Standard 5. Regeltreffer addieren Punkte; ab dieser Grenze wird im blockierenden Modus gesperrt. Höher bedeutet weniger Blockierungen, nicht stärkeren Schutz.')">
                     <AInputNumber v-model:value="waf.inbound_threshold" :min="1" :max="1000" :precision="0" />
                   </AFormItem>
-                  <AFormItem :label="$gettext('Outbound anomaly threshold')">
+                  <AFormItem :label="$gettext('Outbound anomaly threshold')" :help="$gettext('Punktegrenze für Antworten der Anwendung, Standard 4. Im blockierenden Modus können verdächtige Antworten zurückgehalten werden. Die Anfrage kann bereits verarbeitet worden sein.')">
                     <AInputNumber v-model:value="waf.outbound_threshold" :min="1" :max="1000" :precision="0" />
                   </AFormItem>
                 </div>
                 <p class="muted">
-                  {{ $gettext('Higher paranoia levels enable stricter rules. Higher anomaly thresholds allow more matches before blocking.') }}
+                  {{ $gettext('Paranoia-Level bestimmt, welche Regeln prüfen. Die Punktegrenze bestimmt, ab wann Treffer zur Sperre führen. Beides ist weder ein Prozentwert noch die Anzahl erlaubter Angriffe.') }}
                 </p>
-                <AFormItem :label="$gettext('Excluded rule IDs')" :validate-status="excludedIds === undefined ? 'error' : undefined" :help="excludedIds === undefined ? $gettext('Use up to 200 OWASP CRS rule IDs (900000–999999), separated by commas or spaces.') : $gettext('Global exclusions weaken protection for every website using this configuration.')">
+                <AFormItem :label="$gettext('Excluded rule IDs')" :validate-status="excludedIds === undefined ? 'error' : undefined" :help="excludedIds === undefined ? $gettext('Use up to 200 OWASP CRS rule IDs (900000–999999), separated by commas or spaces.') : $gettext('Diese Regelnummern werden global ausgenommen. Bevorzuge bei Fehlalarmen eine Ausnahme nur für die betroffene Website, den Pfad und gegebenenfalls den Parameter. Kommagetrennte IDs, z. B. 942100; kein freier Regeltext.')">
                   <ATextarea v-model:value="exclusions" :rows="3" placeholder="920350, 942100" />
                 </AFormItem>
                 <AButton type="primary" html-type="submit" :loading="busy" :disabled="loading || !wafValid">
@@ -453,6 +463,8 @@ onMounted(refresh)
 
 <style lang="less" scoped>
 .security-center { min-width: 0; }
+.quick-help summary { cursor: pointer; font-weight: 600; }
+.quick-help li { margin-block: 8px; max-width: 85ch; }
 .muted { color: var(--ant-color-text-secondary); }
 .section-gap { margin-bottom: 16px; }
 h3 { margin-top: 24px; }

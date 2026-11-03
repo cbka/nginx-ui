@@ -107,16 +107,16 @@ watch([source, vhost, since], load, { immediate: true })
     </p>
     <AForm layout="vertical">
       <div class="filters">
-        <AFormItem :label="$gettext('Source')">
+        <AFormItem :label="$gettext('Source')" :help="$gettext('ModSecurity zeigt Regeltreffer an einzelnen Anfragen; CrowdSec zeigt die erfassten CrowdSec-Ereignisse. Ein Treffer ist nicht automatisch eine Blockierung.')">
           <ASelect v-model:value="source" :options="[{ value: 'modsecurity', label: 'ModSecurity / OWASP CRS' }, { value: 'crowdsec', label: 'CrowdSec' }]" />
         </AFormItem>
-        <AFormItem :label="$gettext('Website')">
+        <AFormItem :label="$gettext('Website')" :help="$gettext('Grenzt die Anzeige auf einen VHost ein. Ändert keine Schutzrichtlinien und macht eine IP-Sperre nicht websitebezogen.')">
           <ASelect v-model:value="vhost" :options="siteOptions" show-search option-filter-prop="label" />
         </AFormItem>
-        <AFormItem :label="$gettext('Node (apply with refresh)')">
+        <AFormItem :label="$gettext('Node (apply with refresh)')" :help="$gettext('Leer zeigt alle erfassten Knoten. Einen Namen auswählen oder eingeben und aktualisieren, um eine Instanz zu untersuchen.')">
           <AAutoComplete v-model:value="node" :options="nodeOptions" :placeholder="$gettext('All nodes')" allow-clear @select="load" />
         </AFormItem>
-        <AFormItem :label="$gettext('Time range')">
+        <AFormItem :label="$gettext('Time range')" :help="$gettext('Zeitraum der Suche. Die Anzeige ist begrenzt; keine Treffer bedeuten nicht automatisch, dass keine Angriffe stattgefunden haben.')">
           <ASelect v-model:value="since" :options="[{ value: '1h', label: $gettext('Last hour') }, { value: '6h', label: $gettext('Last 6 hours') }, { value: '24h', label: $gettext('Last 24 hours') }]" />
         </AFormItem>
       </div>
