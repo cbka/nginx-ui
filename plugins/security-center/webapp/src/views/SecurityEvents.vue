@@ -137,7 +137,7 @@ watch([source, vhost, since], load, { immediate: true })
           <span class="muted">{{ displayTime(event.timestamp) }}</span>
         </div>
         <div class="tags">
-          <ATag class="source-ip">{{ $gettext('Quell-IP') }}: <code>{{ event.client_ip || $gettext('Nicht im Ereignis enthalten') }}</code></ATag><ATag>{{ event.node || $gettext('Node unknown') }}</ATag><ATag :color="event.source === 'modsecurity' ? 'orange' : 'blue'">
+          <ATag class="source-ip">{{ $gettext('Quell-IP') }}: {{ event.client_ip || $gettext('Nicht im Ereignis enthalten') }}</ATag><ATag>{{ event.node || $gettext('Node unknown') }}</ATag><ATag :color="event.source === 'modsecurity' ? 'orange' : 'blue'">
             {{ event.source }}
           </ATag><ATag v-if="event.rule_id">
             {{ $gettext('Rule') }} {{ event.rule_id }}
