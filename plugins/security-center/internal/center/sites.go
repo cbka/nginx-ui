@@ -27,8 +27,8 @@ type RuleException struct {
 	Parameter string `json:"parameter,omitempty"`
 }
 type SitePolicy struct {
-	ModSecurityAllowlist []string        `json:"modsecurity_allowlist"`
-	CrowdSecAllowlist    []string        `json:"crowdsec_allowlist"`
+	ModSecurityAllowlist []string        `json:"modsecurity_allowlist,omitempty"`
+	CrowdSecAllowlist    []string        `json:"crowdsec_allowlist,omitempty"`
 	Exceptions           []RuleException `json:"exceptions"`
 	BlockedPaths         []string        `json:"blocked_paths"`
 	ModSecurity          string          `json:"modsecurity"`

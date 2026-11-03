@@ -2,6 +2,9 @@ package security_center
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"reflect"
 	"strings"
@@ -127,5 +130,30 @@ func TestModSecurityIPv6HostRendering(t *testing.T) {
 func TestModSecurityZeroMaskRendering(t *testing.T) {
 	if got := modSecurityIPMatch([]string{"0.0.0.0/0", "::/0"}); got != "0.0.0.0/1,128.0.0.0/1,::/1,8000::/1" {
 		t.Fatal(got)
+	}
+}
+
+func TestEmptyAllowlistsPreserveLegacyReplicaHash(t *testing.T) {
+	// Exact pre-allowlist JSON field order from the persisted replica payload.
+	legacy := `{"name":"a.conf","owner":"source","revision":"123","policy":{"exceptions":null,"blocked_paths":null,"modsecurity":"inherit","crowdsec":"inherit","paranoia_level":null,"inbound_threshold":null,"outbound_threshold":null,"excluded_rule_ids":[]},"global":{"crowdsec_enabled":false,"mode":"DetectionOnly","paranoia_level":1,"inbound_threshold":5,"outbound_threshold":4,"excluded_rule_ids":[]}}`
+	var payload ReplicaPayload
+	if err := json.Unmarshal([]byte(legacy), &payload); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(legacy))
+	expected := hex.EncodeToString(sum[:])
+	if payload.hash() != expected {
+		t.Fatal("nil allowlists changed legacy replica hash")
+	}
+	payload.Global.ModSecurityAllowlist = []string{}
+	payload.Global.CrowdSecAllowlist = []string{}
+	payload.Policy.ModSecurityAllowlist = []string{}
+	payload.Policy.CrowdSecAllowlist = []string{}
+	if payload.hash() != expected {
+		t.Fatal("empty allowlists changed legacy replica hash")
+	}
+	payload.Policy.CrowdSecAllowlist = []string{"192.0.2.1"}
+	if payload.hash() == expected {
+		t.Fatal("nonempty allowlist must change replica hash")
 	}
 }

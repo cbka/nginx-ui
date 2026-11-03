@@ -14,8 +14,8 @@ import (
 const marker = "# nginx-ui-security-center: "
 
 type WAFConfig struct {
-	ModSecurityAllowlist []string `json:"modsecurity_allowlist"`
-	CrowdSecAllowlist    []string `json:"crowdsec_allowlist"`
+	ModSecurityAllowlist []string `json:"modsecurity_allowlist,omitempty"`
+	CrowdSecAllowlist    []string `json:"crowdsec_allowlist,omitempty"`
 	CrowdSecEnabled      bool     `json:"crowdsec_enabled"`
 	Mode                 string   `json:"mode"`
 	ParanoiaLevel        int      `json:"paranoia_level"`
