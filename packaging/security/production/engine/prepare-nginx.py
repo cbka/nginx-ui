@@ -21,22 +21,16 @@ server {
  set_real_ip_from 127.0.0.1;
  set_real_ip_from 10.42.0.0/16;
  real_ip_header X-Security-Test-IP;
-    # Health probes must not generate WAF/CrowdSec attack events.
-    location = /healthz {
-        modsecurity off;
-        access_log off;
-        access_by_lua_block {
-            -- Original socket peer: a test Real-IP header must not grant access.
-            local peer = ngx.var.realip_remote_addr or ngx.var.remote_addr
-            if peer ~= "127.0.0.1" and peer ~= "::1" then
-                return ngx.exit(403)
-            end
-        }
-        content_by_lua_block { ngx.say('ok') }
-    }
  location / { content_by_lua_block { ngx.say('Security integration test accepted') } }
 }
 ''')
 link=root/'sites-enabled/security-integration-test.conf'
 if not link.exists():link.symlink_to('/etc/nginx/sites-available/security-integration-test.conf')
 pathlib.Path('/var/log/nginx/modsecurity').mkdir(parents=True,exist_ok=True)
+
+# Loopback health checks remain outside managed Security Center site policies.
+health = root / "conf.d/00-internal-runtime-health.conf"
+health_content = "# Runtime-owned loopback health endpoint; not a managed Security Center site.\n# Specific address takes precedence over the wildcard integration-test listener.\nserver {\n    listen 127.0.0.1:18080;\n    server_name nginx-ui-runtime-health.local;\n    modsecurity off;\n    access_by_lua_block { return }\n    access_log off;\n    location = /healthz { return 200 'ok\\n'; }\n    location / { return 404; }\n}\n"
+if health.exists() and health.read_text() != health_content:
+    raise SystemExit("Existing internal health config differs; refusing overwrite")
+health.write_text(health_content)
