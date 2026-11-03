@@ -59,6 +59,29 @@ func (u *AcmeUser) GetPrivateKey() crypto.Signer {
 	}
 }
 func (u *AcmeUser) Register() error {
+	// Failed registration must never replace a persisted account's identity.
+	candidate := *u
+	if err := candidate.register(); err != nil {
+		return err
+	}
+	*u = candidate
+	return nil
+}
+
+// HasAccountIdentity identifies an existing account without contacting its CA.
+func (u *AcmeUser) HasAccountIdentity() bool {
+	if u.Registration.URI == "" || u.Key.X == nil || u.Key.Y == nil || u.Key.D == nil {
+		return false
+	}
+	curve := elliptic.P256()
+	if u.Key.D.Sign() <= 0 || u.Key.D.Cmp(curve.Params().N) >= 0 || !curve.IsOnCurve(u.Key.X, u.Key.Y) {
+		return false
+	}
+	x, y := curve.ScalarBaseMult(u.Key.D.Bytes())
+	return x.Cmp(u.Key.X) == 0 && y.Cmp(u.Key.Y) == 0
+}
+
+func (u *AcmeUser) register() error {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return err
