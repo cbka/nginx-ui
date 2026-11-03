@@ -1,0 +1,23 @@
+loki.source.file "security_lab" {
+ targets = [
+  { __path__ = "/logs/node1/security-events.jsonl", job = "nginx-security", node = "node1", pod = "node1", namespace = "local-security-lab" },
+  { __path__ = "/logs/node2/security-events.jsonl", job = "nginx-security", node = "node2", pod = "node2", namespace = "local-security-lab" },
+  { __path__ = "/logs/node3/security-events.jsonl", job = "nginx-security", node = "node3", pod = "node3", namespace = "local-security-lab" },
+ ]
+ forward_to = [loki.process.security_lab.receiver]
+ tail_from_end = false
+ file_match { enabled = true }
+}
+loki.process "security_lab" {
+ forward_to = [loki.write.lab.receiver]
+ stage.json { expressions = { event_time = "event_time" } }
+ stage.timestamp {
+  source = "event_time"
+  format = "RFC3339Nano"
+  action_on_failure = "skip"
+ }
+ stage.label_drop { values = ["filename"] }
+}
+loki.write "lab" {
+ endpoint { url = "http://loki:3100/loki/api/v1/push" }
+}

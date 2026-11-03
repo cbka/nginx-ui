@@ -1,0 +1,157 @@
+name: nginx-security-local
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+x-node: &node
+  image: codex/nginx-ui-security:fork-20261103
+  pull_policy: never
+  restart: unless-stopped
+  logging: *logging
+  cpus: 1.0
+  mem_limit: 768m
+  memswap_limit: 768m
+  pids_limit: 256
+  labels:
+    codex.task: nginx-security-local-cluster
+  networks: [lab]
+  environment: &node-env
+    NGINX_UI_SECURITY_CENTER_ENABLED: "true"
+    NGINX_UI_SECURITY_CENTER_CROWDSEC_ENABLED: "true"
+    NGINX_UI_SECURITY_CENTER_MODSECURITY_ENABLED: "true"
+    NGINX_UI_SECURITY_CENTER_SHARING_CONFIG_PATH: /etc/crowdsec/config.yaml
+    NGINX_UI_SECURITY_CENTER_LOKI_URL: http://loki:3100
+    NGINX_UI_SECURITY_AUDIT_ENABLED: "true"
+  depends_on: [crowdsec, loki]
+services:
+  node1:
+    <<: *node
+    container_name: nginx-security-local-node1
+    hostname: node1
+    environment:
+      <<: *node-env
+      NODE_NAME: node1
+    volumes:
+      - ./state/node1/ui:/usr/local/etc/nginx-ui
+      - ./state/node1/nginx:/etc/nginx
+      - ./state/node1/logs:/var/log/nginx
+      - ./state/crowdsec/config:/etc/crowdsec:ro
+  node2:
+    <<: *node
+    container_name: nginx-security-local-node2
+    hostname: node2
+    environment:
+      <<: *node-env
+      NODE_NAME: node2
+    volumes:
+      - ./state/node2/ui:/usr/local/etc/nginx-ui
+      - ./state/node2/nginx:/etc/nginx
+      - ./state/node2/logs:/var/log/nginx
+      - ./state/crowdsec/config:/etc/crowdsec:ro
+  node3:
+    <<: *node
+    container_name: nginx-security-local-node3
+    hostname: node3
+    environment:
+      <<: *node-env
+      NODE_NAME: node3
+    volumes:
+      - ./state/node3/ui:/usr/local/etc/nginx-ui
+      - ./state/node3/nginx:/etc/nginx
+      - ./state/node3/logs:/var/log/nginx
+      - ./state/crowdsec/config:/etc/crowdsec:ro
+  crowdsec:
+    image: codex/nginx-ui-security:fork-20261103
+    pull_policy: never
+    container_name: nginx-security-local-crowdsec
+    entrypoint: [/engine, -c, /etc/crowdsec/config.yaml, -no-cs, -no-capi]
+    restart: unless-stopped
+    logging: *logging
+    cpus: 0.5
+    mem_limit: 384m
+    memswap_limit: 384m
+    pids_limit: 128
+    volumes:
+      - ./state/crowdsec/engine:/engine:ro
+      - ./state/crowdsec/config:/etc/crowdsec
+      - ./state/crowdsec/data:/var/lib/crowdsec/data
+    networks: [lab]
+    labels: {codex.task: nginx-security-local-cluster}
+  loki:
+    image: grafana/loki@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
+    container_name: nginx-security-local-loki
+    user: "0:0"
+    command: [-config.file=/etc/loki/lab.yaml]
+    restart: unless-stopped
+    logging: *logging
+    cpus: 0.5
+    mem_limit: 512m
+    memswap_limit: 512m
+    pids_limit: 128
+    volumes:
+      - ./config/loki.yaml:/etc/loki/lab.yaml:ro
+      - ./state/loki:/loki
+    networks: [lab]
+    labels: {codex.task: nginx-security-local-cluster}
+  alloy:
+    image: grafana/alloy@sha256:2fc2ae17ed3b712e37047724efd1cdf7a4124016c0b7522ac469dab0ddf8a8d7
+    container_name: nginx-security-local-alloy
+    user: "0:0"
+    command: [run, --disable-reporting, --storage.path=/var/lib/alloy, /etc/alloy/lab.alloy]
+    restart: unless-stopped
+    logging: *logging
+    cpus: 0.5
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 128
+    depends_on: [loki]
+    volumes:
+      - ./config/alloy.alloy:/etc/alloy/lab.alloy:ro
+      - ./state/alloy:/var/lib/alloy
+      - ./state/node1/logs:/logs/node1:ro
+      - ./state/node2/logs:/logs/node2:ro
+      - ./state/node3/logs:/logs/node3:ro
+    networks: [lab]
+    labels: {codex.task: nginx-security-local-cluster}
+  faker:
+    build: ./faker
+    image: codex/nginx-security-local-faker:20261103
+    container_name: nginx-security-local-faker
+    restart: unless-stopped
+    logging: *logging
+    cpus: 0.5
+    mem_limit: 128m
+    memswap_limit: 128m
+    pids_limit: 64
+    networks: [lab]
+    labels: {codex.task: nginx-security-local-cluster}
+  gateway:
+    image: codex/nginx-ui-security:fork-20261103
+    pull_policy: never
+    container_name: nginx-security-local-gateway
+    entrypoint: [/usr/sbin/nginx, -c, /gateway.conf, -g, "daemon off;"]
+    restart: unless-stopped
+    logging: *logging
+    cpus: 0.5
+    mem_limit: 128m
+    memswap_limit: 128m
+    pids_limit: 64
+    ports:
+      - "127.0.0.1:4181:4181"
+      - "127.0.0.1:4182:4182"
+      - "127.0.0.1:4183:4183"
+      - "127.0.0.1:4184:4184"
+      - "127.0.0.1:8181:8181"
+      - "127.0.0.1:8182:8182"
+      - "127.0.0.1:8183:8183"
+    volumes: ["./config/gateway.conf:/gateway.conf:ro"]
+    networks: [lab, edge]
+    depends_on: [node1, node2, node3, faker]
+    labels: {codex.task: nginx-security-local-cluster}
+networks:
+  edge:
+    name: nginx-security-local-edge
+    labels: {codex.task: nginx-security-local-cluster}
+  lab:
+    name: nginx-security-local-lab
+    internal: true
+    labels: {codex.task: nginx-security-local-cluster}
