@@ -89,3 +89,18 @@ are never included. Install through the normal API with
 This helper is restricted to the three local test endpoints. Developer mode is
 not required. The publisher is a locally trusted community publisher, not an
 official upstream signer.
+
+### Production NGINX 1.30.6
+
+The production fork now adds the reproducible upstream runtime from
+[`nginx-upgrade/README.md`](nginx-upgrade/README.md) to the immutable security
+image. That step rebuilds NGINX and all 29 dynamic modules together; the Debian
+modules cannot be carried unchanged across the NGINX ABI upgrade. Keep the old
+image digest for rollback and validate the actual mounted production
+configuration before rolling peers one at a time.
+
+Host release `3.0.0-security.5` also suppresses duplicate per-site and per-stream
+reloads following a successful cluster configuration batch. This preserves
+long-lived connections and avoids accumulating redundant old worker generations.
+Only replicated files proven already applied are skipped; manual apply, changed
+or staged files, and unknown startup state still take the normal validation path.
