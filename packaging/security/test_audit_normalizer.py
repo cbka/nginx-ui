@@ -81,11 +81,33 @@ class NormalizerTests(unittest.TestCase):
             event={'site_id':key,'action':'ban','event_time':'2026-11-03T10:00:00Z','transaction_id':'r1','client_ip':'192.0.2.8','path':'/safe?secret=hidden'}
             line='2026/11/03 10:00:00 [warn] 1#1: *1 [lua] nginx_ui_security_events.lua:20: emit(): NGINX_UI_SECURITY_EVENT '+json.dumps(event)+', host: "forged", request: "GET /?secret=hidden"'
             rows=structured_crowdsec(line,'kub2',directory)
+            self.assertEqual(structured_crowdsec(line.replace('[warn]', '[error]'),'kub2',directory), rows)
             self.assertEqual(rows[0]['vhost'],'site.conf')
             self.assertEqual(rows[0]['event_time'],'2026-11-03T10:00:00Z')
             self.assertNotIn('hidden',json.dumps(rows))
             self.assertNotIn('forged',json.dumps(rows))
             self.assertEqual(rows[0]['scenario'],'')
+    def test_appsec_detection_and_block_are_distinct_sanitized_events(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key = hashlib.sha256(b'site.conf').hexdigest()
+            (Path(directory)/(key+'.json')).write_text(json.dumps({'name':'site.conf'}))
+            base = {'source':'crowdsec','component':'appsec','site_id':key,
+                    'event_time':'2026-11-04T01:00:00Z','transaction_id':'request1',
+                    'client_ip':'2001:db8::1','path':'/login?token=secret','headers':{'Authorization':'secret'}}
+            prefix = '2026/11/04 01:00:00 [warn] 1#1: *1 [lua] nginx_ui_appsec.lua:68: emit(): NGINX_UI_APPSEC_EVENT '
+            for mode, action in [('detection','detected'),('block','blocked'),('detection','error')]:
+                event = dict(base, mode=mode, action=action, reason='transport_unavailable')
+                rows = structured_crowdsec(prefix+json.dumps(event)+', request: "secret"','kub1',directory)
+                self.assertEqual(structured_crowdsec(prefix.replace('[warn]', '[error]')+json.dumps(event),'kub1',directory), rows)
+                self.assertEqual(rows[0]['action'], action)
+                self.assertEqual(rows[0]['scenario'], 'appsec/'+mode)
+                self.assertEqual(rows[0]['vhost'], 'site.conf')
+                self.assertEqual(rows[0]['client_ip'], '2001:db8::1')
+                self.assertNotIn('secret', json.dumps(rows))
+            bad = dict(base, mode='detection', action='blocked')
+            self.assertEqual(structured_crowdsec(prefix+json.dumps(bad),'kub1',directory), [])
+            self.assertEqual(structured_crowdsec('user input '+prefix+json.dumps(base),'kub1',directory), [])
+
     def test_invalid_records_do_not_become_events(self):
         self.assertEqual(modsecurity({}, "kub1"), [])
         self.assertEqual(crowdsec("ordinary application error", "kub1"), [])

@@ -145,13 +145,59 @@ def site_identity(audit_file, policy_dir):
 
 
 # A source-local structured hook, distinct from central CrowdSec engine alerts.
-STRUCTURED = re.compile(r"^\d{4}/\d\d/\d\d \d\d:\d\d:\d\d \[warn\].*?\[lua\] nginx_ui_security_events\.lua:\d+: emit\(\): NGINX_UI_SECURITY_EVENT ")
+STRUCTURED = re.compile(r"^\d{4}/\d\d/\d\d \d\d:\d\d:\d\d \[(?:error|warn)\].*?\[lua\] nginx_ui_security_events\.lua:\d+: emit\(\): NGINX_UI_SECURITY_EVENT ")
+
+APPSEC_STRUCTURED = re.compile(r"^\d{4}/\d\d/\d\d \d\d:\d\d:\d\d \[(?:error|warn)\].*?\[lua\] nginx_ui_appsec\.lua:\d+: emit\(\): NGINX_UI_APPSEC_EVENT ")
+APPSEC_ERRORS = {
+    "configuration_unavailable": "AppSec configuration unavailable",
+    "headers_unreadable": "Request headers could not be inspected",
+    "body_unreadable": "Request body could not be inspected",
+    "body_limit": "Request body exceeds AppSec inspection limit",
+    "transport_unavailable": "AppSec listener unavailable or timed out",
+    "invalid_response": "AppSec listener returned an invalid response",
+    "inspection_failed": "AppSec inspection failed",
+}
+
+
+def structured_appsec(line, node, policy_dir):
+    found = APPSEC_STRUCTURED.match(line)
+    if not found:
+        return []
+    try:
+        data, _ = json.JSONDecoder().raw_decode(line[found.end():])
+        if data.get("source") != "crowdsec" or data.get("component") != "appsec":
+            return []
+        action, mode = data.get("action"), data.get("mode")
+        if mode not in ("detection", "block") or action not in ("detected", "blocked", "error"):
+            return []
+        if (action == "blocked" and mode != "block") or (action == "detected" and mode != "detection"):
+            return []
+        reason = data.get("reason", "")
+        if action == "error" and reason not in APPSEC_ERRORS:
+            return []
+        site = data.get("site_id", "")
+        vhost = site_identity(site + ".json", policy_dir) if site else ""
+        timestamp = event_time(data.get("event_time"))
+        transaction = clean(data.get("transaction_id"))
+        if not timestamp or not transaction:
+            return []
+        message = APPSEC_ERRORS[reason] if action == "error" else (
+            "CrowdSec AppSec match detected (not blocked)" if mode == "detection" else "CrowdSec AppSec request blocked")
+        return [{"source": "crowdsec", "component": "appsec", "mode": mode,
+                 "vhost": clean(vhost), "node": clean(node), "event_time": timestamp,
+                 "event_id": identity("crowdsec-appsec", node, transaction, action),
+                 "rule_id": 0, "scenario": "appsec/" + mode, "message": message,
+                 "method": clean(data.get("method"), 16), "path": safe_path(data.get("path", "")),
+                 "parameter": "", "client_ip": client_ip(data.get("client_ip")),
+                 "action": action, "transaction_id": transaction}]
+    except (ValueError, TypeError, AttributeError, FileNotFoundError):
+        return []
 
 
 def structured_crowdsec(line, node, policy_dir):
     found = STRUCTURED.match(line)
     if not found:
-        return []
+        return structured_appsec(line, node, policy_dir)
     try:
         # Ignore Nginx's appended request/header context after the JSON object.
         data, _ = json.JSONDecoder().raw_decode(line[found.end():])

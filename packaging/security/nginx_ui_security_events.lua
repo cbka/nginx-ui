@@ -16,7 +16,7 @@ local function emit(action)
         client_ip = ngx.var.remote_addr or "",
     }
     local encoded = cjson.encode(record)
-    if encoded then ngx.log(ngx.WARN, "NGINX_UI_SECURITY_EVENT ", encoded) end
+    if encoded then ngx.log(ngx.ERR, "NGINX_UI_SECURITY_EVENT ", encoded) end
 end
 function M.install()
     if installed then return end

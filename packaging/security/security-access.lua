@@ -1,12 +1,21 @@
--- This server-owned variable is emitted by the Security Center site policy.
--- Only an explicit 0 bypasses remediation; request headers never choose policy.
-if ngx.var.nginx_ui_crowdsec_enabled == "0" then
-    return
+-- Server-owned variables only: headers never select policy or bypass inspection.
+local function variable(name)
+    local ok, value = pcall(function() return ngx.var[name] end)
+    if ok then return value end
 end
--- Older generated policies do not declare this variable. Undefined Nginx
--- variables can throw, so missing values preserve normal enforcement.
-local ok, allowlist = pcall(function() return ngx.var.nginx_ui_crowdsec_allowlist end)
-if ok and require("nginx_ui_ip_allowlist").matches(allowlist, ngx.var.remote_addr) then
-    return
+local ip = ngx.var.remote_addr
+local allowlist = variable("nginx_ui_crowdsec_allowlist")
+if require("nginx_ui_ip_allowlist").matches(allowlist, ip) then return end
+
+-- AppSec is independent of IP-list remediation. Older policies omit its variable
+-- and remain off. Detection uses a separate engine listener with alerts/events
+-- cancelled; its response is recorded locally and never enforced here.
+local mode = variable("nginx_ui_appsec_mode")
+if mode == "detection" or mode == "block" then
+    require("nginx_ui_appsec").check(mode, ip)
 end
-require("crowdsec").Allow(ngx.var.remote_addr)
+if variable("nginx_ui_crowdsec_enabled") ~= "0" then
+    -- Keep APPSEC_URL empty in the upstream bouncer config: AppSec is called once
+    -- above, while this pinned upstream entrypoint handles IP decisions/captcha.
+    require("crowdsec").Allow(ip)
+end
