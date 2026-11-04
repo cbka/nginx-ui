@@ -7,6 +7,7 @@ import { getErrorMessage, useSettingsStore } from '@/runtime'
 import AppSecPanel from './AppSecPanel.vue'
 import CommunitySharing from './CommunitySharing.vue'
 import { canManageSecurity, crowdsecListResult, normalizeDecisions, normalizeScenarios, parseExcludedRules } from './normalize'
+import { filterSecurityRows, paginateSecurityRows, SECURITY_PAGE_SIZE } from './pagination'
 import SecurityEvents from './SecurityEvents.vue'
 import { validAllowlistDraft } from './sitePolicy'
 import SiteProtection from './SiteProtection.vue'
@@ -31,6 +32,13 @@ const scenariosError = ref('')
 const wafError = ref('')
 const decisions = ref<Decision[]>([])
 const scenarios = ref<Scenario[]>([])
+const scenarioSearch = ref('')
+const scenarioPage = ref(1)
+watch(scenarioSearch, () => {
+  scenarioPage.value = 1
+}, { flush: 'sync' })
+const filteredScenarios = computed(() => filterSecurityRows(scenarios.value, scenarioSearch.value, item => `${item.name} ${item.status ?? ''} ${item.version ?? ''}`))
+const paginatedScenarios = computed(() => paginateSecurityRows(filteredScenarios.value, scenarioPage.value))
 const waf = ref<ModSecurityConfig>()
 const savedWaf = ref('')
 const exclusions = ref('')
@@ -399,11 +407,15 @@ onMounted(refresh)
                 {{ $gettext('Install') }}
               </AButton>
             </div>
+            <AInput v-model:value="scenarioSearch" allow-clear :placeholder="$gettext('Szenarien suchen')" :aria-label="$gettext('Szenarien suchen')" class="section-gap" />
+            <p aria-live="polite">
+              {{ $gettext('%{count} passende Einträge · 20 pro Seite', { count: String(filteredScenarios.length) }) }}
+            </p>
             <div class="table-scroll">
               <table class="security-table">
                 <thead><tr><th>{{ $gettext('Name') }}</th><th>{{ $gettext('Status') }}</th><th>{{ $gettext('Version') }}</th><th>{{ $gettext('Actions') }}</th></tr></thead>
                 <tbody>
-                  <tr v-for="item in scenarios" :key="item.name">
+                  <tr v-for="item in paginatedScenarios.rows" :key="item.name">
                     <td>{{ item.name }}</td><td>{{ item.status || (item.installed ? $gettext('Installed') : $gettext('Available')) }}</td><td>{{ item.version }}</td>
                     <td>
                       <AButton :danger="item.installed" size="small" :disabled="busy || loading || !status.scenario_changes_enabled" @click="changeScenario(item.name, item.installed ? 'remove' : 'install')">
@@ -411,14 +423,15 @@ onMounted(refresh)
                       </AButton>
                     </td>
                   </tr>
-                  <tr v-if="!scenarios.length">
+                  <tr v-if="!filteredScenarios.length">
                     <td colspan="4">
-                      {{ scenariosError ? $gettext('Scenario list unavailable or incomplete.') : $gettext('No scenarios returned.') }}
+                      {{ scenariosError ? $gettext('Scenario list unavailable or incomplete.') : $gettext('Keine passenden Szenarien gefunden.') }}
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
+            <APagination :current="paginatedScenarios.page" :total="paginatedScenarios.total" :page-size="SECURITY_PAGE_SIZE" :show-size-changer="false" :hide-on-single-page="true" class="section-gap" @change="scenarioPage = $event" />
           </template>
         </ATabPane>
         <ATabPane key="appsec" :tab="$gettext('CrowdSec AppSec')">

@@ -1,7 +1,7 @@
-import http.client,importlib.util,json,pathlib,tempfile,threading,unittest
+import http.client,importlib.util,json,pathlib,tempfile,threading,unittest,sys
 from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('control',pathlib.Path(__file__).with_name('control.py'))
-c=importlib.util.module_from_spec(spec);spec.loader.exec_module(c)
+c=importlib.util.module_from_spec(spec);sys.modules[spec.name]=c;spec.loader.exec_module(c)
 class TestControl(unittest.TestCase):
  def test_allowlist(self):
   for args in [['decisions','list','-o','json','--limit','100','--no-simu'],['scenarios','list','-o','json'],['scenarios','install','crowdsecurity/nginx-req-limit'],['decisions','delete','--id','12'],['decisions','add','--ip','192.0.2.1','--duration','5m','--reason','test','--type','ban']]:self.assertTrue(c.allowed(args))
@@ -56,7 +56,7 @@ class TestControl(unittest.TestCase):
      file.write_text(json.dumps({'api':{'server':{'online_client':{'sharing':False}}}}))
      hub=root/'hub';hub.mkdir();(hub/'old.yaml').write_text('old')
      scenarios=root/'scenarios';scenarios.mkdir();(scenarios/'old.yaml').symlink_to(hub/'old.yaml')
-     def mutate(args):
+     def mutate(args, timeout=12):
       (hub/'old.yaml').write_text('changed');(scenarios/'old.yaml').unlink();(scenarios/'new.yaml').write_text('new')
       if failure=='command':raise RuntimeError('partial install')
       return 'ok'
@@ -76,4 +76,12 @@ class TestControl(unittest.TestCase):
    with patch.object(c,'CONFIG',file),patch.object(c,'invoke') as invoke:
     with self.assertRaisesRegex(RuntimeError,'symlink escapes'):c.scenario_change(['scenarios','install','crowdsecurity/test'])
     invoke.assert_not_called()
+class ReloadReadinessTest(unittest.TestCase):
+ def test_waits_for_managed_appsec_before_success(self):
+  import appsec
+  with tempfile.TemporaryDirectory() as d:
+   root=pathlib.Path(d);(root/'acquis.d').mkdir();(root/'acquis.d/nginx-ui-appsec.yaml').write_text('{}')
+   with patch.object(c,'CONFIG',root/'config.yaml'),patch.object(c,'invoke'),patch.object(c,'engine_ready',return_value=True),patch.object(appsec,'runtime_verified',side_effect=[False,True]),patch.object(c.time,'sleep') as sleep:
+    c.reload_engine();sleep.assert_called_once()
+
 if __name__=='__main__':unittest.main()

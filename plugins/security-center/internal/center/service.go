@@ -45,7 +45,11 @@ func Execute(ctx context.Context, path string, args ...string) ([]byte, error) {
 	if !filepath.IsAbs(path) {
 		return nil, ErrInvalid
 	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	timeout := 20 * time.Second
+	if len(args) == 3 && ((args[0] == "scenarios" && (args[1] == "install" || args[1] == "remove")) || (args[0] == "appsec-rules" && (args[1] == "install" || args[1] == "activate"))) {
+		timeout = 130 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.WaitDelay = time.Second
@@ -77,6 +81,9 @@ func (s *Service) List(ctx context.Context, kind string) (json.RawMessage, error
 		return nil, ErrInvalid
 	}
 	args := []string{kind, "list", "-o", "json"}
+	if kind == "scenarios" {
+		args = append(args, "-a")
+	}
 	if kind == "decisions" {
 		args = append(args, "--limit", "100", "--no-simu")
 	}
@@ -136,6 +143,9 @@ func (s *Service) Scenario(ctx context.Context, name, action string) error {
 	if err := s.crowdsec(); err != nil {
 		return err
 	}
+	if strings.HasPrefix(name, "crowdsecurity/vpatch-") || name == "crowdsecurity/base-config" {
+		return errors.New("this is an AppSec rule; use the AppSec rule actions, not detection scenarios")
+	}
 	if !scenarioName.MatchString(name) || (action != "install" && action != "remove") {
 		return ErrInvalid
 	}
@@ -144,11 +154,29 @@ func (s *Service) Scenario(ctx context.Context, name, action string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.Run(ctx, s.Config.CSCLIPath, "scenarios", action, name); err != nil {
+	result, err := s.Run(ctx, s.Config.CSCLIPath, "scenarios", action, name)
+	if err != nil {
 		return err
+	}
+	if err := operationError(result); err != nil {
+		return err
+	}
+	var receipt map[string]json.RawMessage
+	if json.Unmarshal(result, &receipt) == nil && len(receipt) == 1 && string(receipt["engine_reloaded"]) == "true" {
+		return nil
 	}
 	if _, err := s.Run(ctx, s.Config.CrowdSecReloadPath); err != nil {
 		return errors.New("scenario files changed, but CrowdSec reload failed; reconcile engine before retrying")
+	}
+	return nil
+}
+
+func operationError(out []byte) error {
+	var result struct {
+		Message string `json:"operation_error"`
+	}
+	if json.Unmarshal(out, &result) == nil && result.Message != "" && len(result.Message) <= 256 {
+		return errors.New(result.Message)
 	}
 	return nil
 }

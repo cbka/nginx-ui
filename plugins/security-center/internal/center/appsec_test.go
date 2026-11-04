@@ -115,3 +115,34 @@ func TestAppSecPolicyReplicationAndLifecycle(t *testing.T) {
 		t.Fatal("plugin-off left AppSec attached")
 	}
 }
+
+func TestAppSecRuleMutationRequiresVerifiedReceipt(t *testing.T) {
+	s := testService(t)
+	s.Config.AppSecEnabled = true
+	name := "crowdsecurity/vpatch-CVE-2026-1234"
+	called := 0
+	s.Run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		called++
+		if len(args) != 3 || args[0] != "appsec-rules" || args[2] != name {
+			t.Fatal(args)
+		}
+		return []byte(`{"applied":true,"loaded":true,"name":"crowdsecurity/vpatch-CVE-2026-1234"}`), nil
+	}
+	if err := s.ChangeAppSecRule(context.Background(), name, "activate"); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"evil/vpatch-test", "crowdsecurity/generic-test", "crowdsecurity/vpatch-../../etc"} {
+		if s.ChangeAppSecRule(context.Background(), bad, "install") == nil {
+			t.Fatal(bad)
+		}
+	}
+	if called != 1 {
+		t.Fatal("invalid names executed")
+	}
+	s.Run = func(context.Context, string, ...string) ([]byte, error) {
+		return []byte(`{"applied":true,"loaded":false}`), nil
+	}
+	if s.ChangeAppSecRule(context.Background(), name, "install") == nil {
+		t.Fatal("unverified activation accepted")
+	}
+}

@@ -31,6 +31,7 @@ export interface AppSecHubItem {
   loaded?: boolean | null
   update_available?: boolean
   tainted?: boolean
+  editable?: boolean
 }
 
 export interface AppSecStatus {
@@ -141,6 +142,7 @@ const base = '/security-center'
 const options = {}
 
 export default {
+  changeAppSecRule: (name: string, action: 'install' | 'activate'): Promise<SecurityMutation> => http.post(`${base}/crowdsec/appsec/rules`, { name, action }, options),
   appsec: (): Promise<AppSecStatus> => http.get(`${base}/crowdsec/appsec`, options),
   sharing: (): Promise<CrowdSecSharing> => http.get(`${base}/crowdsec/sharing`, options),
   saveSharing: (enabled: boolean): Promise<CrowdSecSharing> => http.put(`${base}/crowdsec/sharing`, { enabled }, options),

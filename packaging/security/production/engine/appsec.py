@@ -1,5 +1,5 @@
 """Private AppSec inventory and explicit, transactional virtual-patching bootstrap."""
-import json, os, socket, tempfile
+import json, os, socket, tempfile, time
 
 COLLECTION = 'crowdsecurity/appsec-virtual-patching'
 LISTEN = '0.0.0.0:7422'
@@ -27,7 +27,8 @@ def rows(control, kind):
                        'version':str(item.get('local_version',''))[:128], 'status':status[:256],
                        'available':'local' not in flags, 'installed':'enabled' in flags,
                        'update_available':'update-available' in flags,
-                       'tainted':'tainted' in flags, 'loaded':None})
+                       'tainted':'tainted' in flags, 'loaded':None,
+                       'editable':kind=='appsec-rules' and supported_rule(item['name']) and 'local' not in flags and 'tainted' not in flags})
     return result
 
 def managed_files(control):
@@ -53,6 +54,7 @@ def inventory(control):
     active=enabled(control)
     rules=rows(control,'appsec-rules')
     verified=runtime_verified(control)
+    for rule in rules:rule['editable']=rule.get('editable',False) and active
     if verified:
         for rule in rules:
             if rule['installed'] and (rule['name']=='crowdsecurity/base-config' or rule['name'].startswith('crowdsecurity/vpatch-')):
@@ -152,3 +154,32 @@ def runtime_verified(control):
         if [b'-c',str(control.CONFIG).encode()] not in [cmd[i:i+2] for i in range(len(cmd)-1)]:return False
         return receipt.get('fingerprint')==runtime_fingerprint(control)
     except (OSError,ValueError,KeyError,TypeError,IndexError):return False
+
+
+def supported_rule(name):
+    import re
+    return isinstance(name,str) and re.fullmatch(r'crowdsecurity/(?:base-config|vpatch-[a-zA-Z0-9_-]{1,120})',name) is not None
+
+def change_rule(control, name, action):
+    """Only rules selected by both managed virtual-patching profiles may activate."""
+    if action not in ('install','activate') or not supported_rule(name):
+        raise ValueError('Unsupported AppSec rule operation')
+    if not enabled(control):raise ValueError('Enable the managed AppSec engine first')
+    match=next((r for r in rows(control,'appsec-rules') if r['name']==name),None)
+    if match is None or not match['available'] or match['tainted']:
+        raise ValueError('Rule must be an unmodified official Hub entry')
+    def operation():
+        if not match['installed']:
+            control.invoke(['/usr/bin/cscli','appsec-rules','install',name],timeout=25)
+        return name
+    def activate(result):
+        control.reload_engine()
+        deadline=time.monotonic()+30
+        while not runtime_verified(control):
+            if time.monotonic()>=deadline:raise RuntimeError('AppSec listeners did not become ready after reload')
+            time.sleep(.2)
+        if not any(r['name']==name and r['installed'] for r in rows(control,'appsec-rules')):
+            raise RuntimeError('AppSec rule activation could not be verified')
+        return False
+    control.configuration_transaction(operation,reload_required=activate)
+    return {'applied':True,'name':name,'loaded':True,'engine_reloaded':True}

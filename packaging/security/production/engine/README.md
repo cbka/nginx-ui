@@ -174,3 +174,21 @@ Hourly upgrades retain genuinely new dependencies introduced by the official
 virtual-patching collection, but never reactivate previously known disabled
 entries or unrelated scenarios. Lookup data and configuration roll back together
 on failed validation, without replacing live SQLite data.
+
+### Managed AppSec rule actions
+
+`POST /appsec/rules` accepts exactly `name` and `action` (`install` or `activate`).
+The plugin exposes this as `POST /security-center/crowdsec/appsec/rules`.
+Both operations install when necessary and activate the named rule through a
+validated transactional engine reload. They support only unmodified official
+`crowdsecurity/vpatch-*` rules and `crowdsecurity/base-config`, which both managed
+listener profiles already select. Other rule families, arbitrary configurations,
+and collections are inventory-only; installing them does not imply activation.
+The engine must already be enabled. Success requires a verified startup receipt
+and the selected rule reported as loaded. Failure restores the prior configuration.
+These installations remain selected by the existing virtual-patching wildcard;
+hourly Hub updates retain installed entries and the current activation profile.
+
+Scenario mutations now return an explicit reload receipt to the plugin bridge,
+so a completed central transaction is not followed by a second engine restart.
+Native cscli integrations without that receipt retain their configured reload.

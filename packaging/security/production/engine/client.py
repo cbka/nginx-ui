@@ -9,14 +9,28 @@ try:
     reload=pathlib.Path(sys.argv[0]).name=='crowdsec-reload'
     args=sys.argv[1:]
     appsec=args in [['appsec','status'],['appsec','enable'],['appsec','disable']]
+    rule=len(args)==3 and args[0]=='appsec-rules' and args[1] in ('install','activate')
+    scenario=len(args)==3 and args[0]=='scenarios' and args[1] in ('install','remove')
     method='GET' if appsec and args[1]=='status' else 'PUT' if appsec else 'POST'
     body=({'enabled':args[1]=='enable'} if method=='PUT' else {}) if appsec or reload else {'args':args}
-    request=urllib.request.Request(base+('/appsec' if appsec else '/reload' if reload else '/cscli'),data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'},method=method)
-    with urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect).open(request,timeout=210 if appsec and method=='PUT' else 18) as r:
+    if rule:body={'action':args[1],'name':args[2]}
+    request=urllib.request.Request(base+('/appsec/rules' if rule else '/appsec' if appsec else '/reload' if reload else '/cscli'),data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'},method=method)
+    with urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect).open(request,timeout=210 if appsec and method=='PUT' else 120 if rule or scenario or reload else 18) as r:
         data=r.read(2*1024*1024+1)
         if len(data)>2*1024*1024:raise RuntimeError('Response too large')
         value=json.loads(data)
-        if appsec:print(json.dumps(value))
+        if rule:print(json.dumps(value))
+        elif scenario and value.get('engine_reloaded') is True:print(json.dumps({'engine_reloaded':True}))
+        elif appsec:print(json.dumps(value))
         elif not reload:sys.stdout.write(value['stdout'])
+except urllib.error.HTTPError as error:
+    if rule or scenario:
+        try:
+            value=json.loads(error.read(8192))
+            message=value.get('message','Engine rejected the operation')
+            if not isinstance(message,str) or len(message)>256:raise ValueError()
+            print(json.dumps({'operation_error':message}));sys.exit(0)
+        except (ValueError,TypeError):pass
+    print('Central CrowdSec operation failed',file=sys.stderr);sys.exit(1)
 except Exception:
     print('Central CrowdSec operation failed',file=sys.stderr);sys.exit(1)

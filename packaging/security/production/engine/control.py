@@ -17,7 +17,7 @@ def invoke(args, timeout=12):
 
 def allowed(args):
     if not isinstance(args,list) or not all(isinstance(x,str) and len(x)<=256 and '\x00' not in x for x in args): return False
-    if args in [['decisions','list','-o','json','--limit','100','--no-simu'], ['scenarios','list','-o','json']]: return True
+    if args in [['decisions','list','-o','json','--limit','100','--no-simu'], ['scenarios','list','-o','json'], ['scenarios','list','-o','json','-a']]: return True
     if len(args)==3 and args[0]=='scenarios' and args[1] in ['install','remove']:
         return re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}/[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}',args[2]) is not None
     if len(args)==4 and args[:3]==['decisions','delete','--id']:
@@ -52,11 +52,15 @@ def engine_ready():
     except OSError:return False
 
 def reload_engine():
-    invoke(['/usr/local/bin/crowdsec','-c',str(CONFIG),'-t','-no-capi'],6)
-    invoke(['supervisorctl','-c','/etc/supervisor/engine.conf','restart','crowdsec'],6)
-    deadline=time.monotonic()+3
+    invoke(['/usr/local/bin/crowdsec','-c',str(CONFIG),'-t','-no-capi'],15)
+    invoke(['supervisorctl','-c','/etc/supervisor/engine.conf','restart','crowdsec'],15)
+    deadline=time.monotonic()+30
     while time.monotonic()<deadline:
-        if engine_ready():return
+        if engine_ready():
+            # LAPI starts before the AppSec rule loaders and their listeners.
+            # A successful reload must include managed protection readiness.
+            import appsec
+            if not (CONFIG.parent/'acquis.d/nginx-ui-appsec.yaml').exists() or appsec.runtime_verified(sys.modules[__name__]):return
         time.sleep(.2)
     raise RuntimeError('Engine restart did not become ready')
 
@@ -91,7 +95,7 @@ def scenario_change(args):
     """
     if not allowed(args) or len(args)!=3 or args[:2] not in [['scenarios','install'],['scenarios','remove']]:
         raise ValueError('Unsupported scenario operation')
-    return configuration_transaction(lambda: invoke(['/usr/bin/cscli',*args]))
+    return configuration_transaction(lambda: invoke(['/usr/bin/cscli',*args],timeout=25))
 
 def configuration_transaction(operation, reload_required=lambda result: True, rollback_extra=lambda: None):
     """Caller holds LOCK; snapshot config only, then validate/reload or restore."""
@@ -164,6 +168,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 elif self.command=='PUT' and self.path=='/appsec' and isinstance(body,dict) and set(body)=={'enabled'} and type(body['enabled']) is bool:
                     import appsec
                     result=appsec.set_enabled(sys.modules[__name__],body['enabled'])
+                elif self.command=='POST' and self.path=='/appsec/rules' and isinstance(body,dict) and set(body)=={'name','action'}:
+                    import appsec
+                    try:result=appsec.change_rule(sys.modules[__name__],body['name'],body['action'])
+                    except ValueError as err:
+                        known={'Unsupported AppSec rule operation','Enable the managed AppSec engine first','Rule must be an unmodified official Hub entry'}
+                        if str(err) in known:return self.send(400,{'message':str(err)})
+                        raise
                 elif self.command=='GET' and self.path=='/hub-updates':
                     import hub_update
                     result=hub_update.read_status()
@@ -171,7 +182,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 elif self.command=='POST' and self.path=='/reload' and body=={}:reload_engine();result={'reloaded':True}
                 elif self.command=='POST' and self.path=='/cscli' and isinstance(body,dict) and set(body)=={'args'} and allowed(body['args']):
                     args=body['args']
-                    result={'stdout':scenario_change(args) if args[:2] in [['scenarios','install'],['scenarios','remove']] else invoke(['/usr/bin/cscli',*args])}
+                    mutation=args[:2] in [['scenarios','install'],['scenarios','remove']]
+                    result={'stdout':scenario_change(args) if mutation else invoke(['/usr/bin/cscli',*args])}
+                    if mutation:result['engine_reloaded']=True
                 else:return self.send(400,{'message':'Unsupported operation'})
             self.send(200,result)
         except (ValueError,TypeError,KeyError):self.send(400,{'message':'Invalid request or engine configuration'})

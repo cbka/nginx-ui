@@ -75,4 +75,38 @@ class AppSecTest(unittest.TestCase):
  def test_new_dependency_scope(self):
   result=hub_update.virtual_patch_dependencies({'collections':{'crowdsecurity/appsec-virtual-patching':{'appsec-rules':['crowdsecurity/vpatch-new','evil/new'],'scenarios':['crowdsecurity/appsec-new']}}})
   self.assertEqual(result,{('appsec-rules','crowdsecurity/vpatch-new'),('scenarios','crowdsecurity/appsec-new')})
+
+
+class RuleActionsTest(unittest.TestCase):
+ def test_rule_allowlist(self):
+  for name in ('crowdsecurity/vpatch-CVE-2026-1234','crowdsecurity/base-config'):
+   self.assertTrue(appsec.supported_rule(name))
+  for name in ('crowdsecurity/generic-test','evil/vpatch-a','crowdsecurity/vpatch-../a','crowdsecurity/vpatch-a;pwd',None):
+   self.assertFalse(appsec.supported_rule(name))
+ def test_install_and_activation_verified(self):
+  name='crowdsecurity/vpatch-CVE-2026-1234'
+  for installed in (False,True):
+   for loaded in (False,True):
+    with self.subTest(installed=installed,loaded=loaded):
+     def transaction(op,reload_required):reload_required(op())
+     with patch.object(appsec,'enabled',return_value=True),patch.object(appsec,'rows',side_effect=[[{'name':name,'available':True,'tainted':False,'installed':installed}],[{'name':name,'installed':True}]]),patch.object(appsec,'runtime_verified',return_value=loaded),patch.object(appsec.time,'monotonic',side_effect=[0,31]),patch.object(control,'invoke') as invoke,patch.object(control,'reload_engine') as reload,patch.object(control,'configuration_transaction',side_effect=transaction):
+      if loaded:self.assertTrue(appsec.change_rule(control,name,'activate')['loaded'])
+      else:
+       with self.assertRaisesRegex(RuntimeError,'did not become ready'):appsec.change_rule(control,name,'install')
+      self.assertEqual(invoke.call_count,int(not installed));reload.assert_called_once()
+ def test_unknown_tainted_or_disabled_rule_not_mutated(self):
+  name='crowdsecurity/vpatch-test'
+  for entries in ([],[{'name':name,'available':True,'tainted':True}]):
+   with patch.object(appsec,'enabled',return_value=True),patch.object(appsec,'rows',return_value=entries),patch.object(control,'configuration_transaction') as transaction:
+    with self.assertRaises(ValueError):appsec.change_rule(control,name,'install')
+    transaction.assert_not_called()
+
+class StartupReadinessTest(unittest.TestCase):
+ def test_appsec_waits_for_listeners_after_lapi_is_ready(self):
+  name='crowdsecurity/vpatch-test'
+  def transaction(op,reload_required):reload_required(op())
+  with patch.object(appsec,'enabled',return_value=True),patch.object(appsec,'rows',return_value=[{'name':name,'available':True,'tainted':False,'installed':True}]),patch.object(appsec,'runtime_verified',side_effect=[False,False,True]),patch.object(appsec.time,'sleep') as sleep,patch.object(control,'reload_engine') as reload,patch.object(control,'configuration_transaction',side_effect=transaction):
+   self.assertTrue(appsec.change_rule(control,name,'activate')['loaded'])
+   self.assertEqual(sleep.call_count,2);reload.assert_called_once()
+
 if __name__=='__main__':unittest.main()

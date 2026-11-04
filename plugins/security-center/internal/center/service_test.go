@@ -160,3 +160,32 @@ func TestDecisionListHasExplicitLimitAndExcludesSimulation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestScenarioCatalogIncludesAvailableEntries(t *testing.T) {
+	s := testService(t)
+	s.Run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if !reflect.DeepEqual(args, []string{"scenarios", "list", "-o", "json", "-a"}) {
+			t.Fatal(args)
+		}
+		return []byte(`{"scenarios":[]}`), nil
+	}
+	if _, err := s.List(context.Background(), "scenarios"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCentralScenarioReceiptAvoidsSecondRestart(t *testing.T) {
+	s := testService(t)
+	s.Config.CrowdSecReloadPath = "/reload"
+	calls := 0
+	s.Run = func(context.Context, string, ...string) ([]byte, error) {
+		calls++
+		return []byte(`{"engine_reloaded":true}`), nil
+	}
+	if err := s.Scenario(context.Background(), "crowdsecurity/test", "install"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatal("central engine restarted twice")
+	}
+}

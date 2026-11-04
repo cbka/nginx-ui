@@ -92,3 +92,33 @@ func (s *Service) AppSecRuntimeReady(ctx context.Context) bool {
 	hook, err := os.ReadFile(accessHook)
 	return err == nil && strings.Contains(string(hook), "nginx_ui_appsec")
 }
+
+func (s *Service) ChangeAppSecRule(ctx context.Context, name, action string) error {
+	if err := s.crowdsec(); err != nil {
+		return err
+	}
+	if !s.Config.AppSecEnabled {
+		return ErrDisabled
+	}
+	if !scenarioName.MatchString(name) || (!strings.HasPrefix(name, "crowdsecurity/vpatch-") && name != "crowdsecurity/base-config") || (action != "install" && action != "activate") {
+		return ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out, err := s.Run(ctx, s.Config.CSCLIPath, "appsec-rules", action, name)
+	if err != nil {
+		return err
+	}
+	if err := operationError(out); err != nil {
+		return err
+	}
+	var result struct {
+		Applied bool   `json:"applied"`
+		Loaded  bool   `json:"loaded"`
+		Name    string `json:"name"`
+	}
+	if json.Unmarshal(out, &result) != nil || !result.Applied || !result.Loaded || result.Name != name {
+		return errors.New("AppSec activation was not verified")
+	}
+	return nil
+}

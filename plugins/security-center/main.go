@@ -157,7 +157,7 @@ func main() {
 		os.Exit(1)
 	}
 	_ = os.Chmod(socket, 0600)
-	server := &http.Server{Handler: a.guarded(router, secret), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 90 * time.Second, MaxHeaderBytes: 16 << 10}
+	server := &http.Server{Handler: a.guarded(router, secret), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 150 * time.Second, MaxHeaderBytes: 16 << 10}
 	go server.Serve(listener)
 	conn.Handle("plugin.initialize", func(context.Context, json.RawMessage) (any, error) {
 		return map[string]any{"api_version": 1, "capabilities": []string{"http"}}, nil
@@ -166,7 +166,7 @@ func main() {
 		defer close(a.initializedDone)
 		a.mu.Lock()
 		defer a.mu.Unlock()
-		ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 150*time.Second)
 		defer cancel()
 		if err := a.start(ctx); err != nil {
 			a.failure = err.Error()

@@ -140,3 +140,18 @@ func AppSec(c *gin.Context) {
 	}
 	c.Data(200, "application/json", b)
 }
+
+func ChangeAppSecRule(c *gin.Context) {
+	var p struct {
+		Name   string `json:"name"`
+		Action string `json:"action"`
+	}
+	if !bind(c, &p) {
+		return
+	}
+	if err := manager().ChangeAppSecRule(c.Request.Context(), p.Name, p.Action); err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(200, gin.H{"applied": true, "message": "AppSec rule installed and engine loading verified"})
+}
