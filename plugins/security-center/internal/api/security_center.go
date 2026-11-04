@@ -33,7 +33,7 @@ func bind(c *gin.Context, v any) bool {
 }
 func Status(c *gin.Context) {
 	s := manager()
-	c.JSON(200, gin.H{"enabled": s.Config.Enabled, "crowdsec_enabled": s.Config.Enabled && s.Config.CrowdSecEnabled, "modsecurity_enabled": s.Config.Enabled && s.Config.ModSecurityEnabled, "events_configured": s.Config.Enabled && strings.TrimSpace(os.Getenv("SECURITY_CENTER_LOKI_URL")) != "", "scenario_changes_enabled": s.Config.Enabled && s.Config.CrowdSecEnabled && s.Config.CrowdSecReloadPath != "", "runtime_integration_verified": s.RuntimeReady(c.Request.Context())})
+	c.JSON(200, gin.H{"enabled": s.Config.Enabled, "appsec_enabled": s.Config.Enabled && s.Config.CrowdSecEnabled && s.Config.AppSecEnabled, "crowdsec_enabled": s.Config.Enabled && s.Config.CrowdSecEnabled, "modsecurity_enabled": s.Config.Enabled && s.Config.ModSecurityEnabled, "events_configured": s.Config.Enabled && strings.TrimSpace(os.Getenv("SECURITY_CENTER_LOKI_URL")) != "", "scenario_changes_enabled": s.Config.Enabled && s.Config.CrowdSecEnabled && s.Config.CrowdSecReloadPath != "", "runtime_integration_verified": s.RuntimeReady(c.Request.Context())})
 }
 func Decisions(c *gin.Context) {
 	b, err := manager().List(c.Request.Context(), "decisions")
@@ -130,4 +130,13 @@ func PutSite(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"name": v.Name, "policy": v.Policy, "effective": v.Effective, "applied": true, "message": "Local policy saved; Nginx configuration validated and reload requested. Disabled sites remain inactive; peer rollout is not implied"})
+}
+
+func AppSec(c *gin.Context) {
+	b, err := manager().AppSecInventory(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.Data(200, "application/json", b)
 }

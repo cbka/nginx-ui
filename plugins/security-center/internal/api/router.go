@@ -17,6 +17,7 @@ func InitRouter(parent *gin.RouterGroup) {
 	g.GET("/crowdsec/decisions", Decisions)
 	g.POST("/crowdsec/decisions", AddDecision)
 	g.DELETE("/crowdsec/decisions/:id", DeleteDecision)
+	g.GET("/crowdsec/appsec", AppSec)
 	g.GET("/crowdsec/scenarios", Scenarios)
 	g.POST("/crowdsec/scenarios", ChangeScenario)
 	g.GET("/modsecurity/rules", Rules)

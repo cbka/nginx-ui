@@ -4,6 +4,7 @@ export function inheritedSitePolicy(): SiteSecurityPolicy {
   return {
     modsecurity: 'inherit',
     crowdsec: 'inherit',
+    appsec: 'inherit',
     paranoia_level: null,
     inbound_threshold: null,
     outbound_threshold: null,
@@ -24,6 +25,7 @@ export function validSitePolicy(policy: SiteSecurityPolicy | undefined): boolean
       'DetectionOnly',
     ].includes(policy.modsecurity)
     && ['inherit', 'on', 'off'].includes(policy.crowdsec)
+    && (policy.appsec === undefined || ['inherit', 'off', 'detection', 'block'].includes(policy.appsec))
     && (policy.paranoia_level === null || [1, 2, 3, 4].includes(policy.paranoia_level))
     && [policy.inbound_threshold, policy.outbound_threshold].every(value => value === null || (Number.isInteger(value) && value >= 1 && value <= 1000))
     && policy.exceptions.length <= 100 && policy.exceptions.every(validException)

@@ -97,6 +97,7 @@ async function load() {
     state.value.policy.blocked_paths ??= []
     state.value.policy.modsecurity_allowlist ??= []
     state.value.policy.crowdsec_allowlist ??= []
+    state.value.policy.appsec ??= 'inherit'
     restoreForm()
     if (props.draft && !draftConsumed && policy.value && !state.value.replica) {
       draftConsumed = true
@@ -124,7 +125,7 @@ async function load() {
 }
 
 function templateDraft(next: SiteSecurityPolicy) {
-  policy.value = next
+  policy.value = { ...next, appsec: next.appsec ?? 'inherit' }
   exclusions.value = next.excluded_rule_ids.join(', ')
   blockedPaths.value = next.blocked_paths.join('\n')
   modsecurityAllowlist.value = (next.modsecurity_allowlist ?? []).join('\n')
@@ -158,7 +159,7 @@ function apply() {
   }
   modal.confirm({
     title: $gettext('Apply protection to %{name}?', { name }),
-    content: $gettext('This changes every server block in this website configuration. Nginx will validate and reload. Disabling inspection or CrowdSec enforcement reduces protection; exclusions are added to global exclusions. Exact path block rules deny matching requests with HTTP 403 when WAF blocking is active. IP allowlists bypass the respective protection and are added to global allowlists.'),
+    content: $gettext('This changes every server block in this website configuration. Nginx will validate and reload. AppSec observes without blocking in detection mode and can reject requests in block mode. Disabling inspection or CrowdSec enforcement reduces protection; exclusions are added to global exclusions. Exact path block rules deny matching requests with HTTP 403 when WAF blocking is active. IP allowlists bypass the respective protection and are added to global allowlists.'),
     okText: $gettext('Validate and apply'),
     okButtonProps: { danger: change.modsecurity !== 'On' || change.crowdsec === 'off' || change.excluded_rule_ids.length > 0 || change.exceptions.length > 0 || change.blocked_paths.length > 0 || change.modsecurity_allowlist.length > 0 || change.crowdsec_allowlist.length > 0 },
     async onOk() {
@@ -234,6 +235,7 @@ watch(() => props.name, () => {
           <ATag :color="state.effective.crowdsec ? 'green' : 'orange'">
             CrowdSec: {{ state.effective.crowdsec ? $gettext('Enforced') : $gettext('Not enforced') }}
           </ATag>
+          <ATag>AppSec: {{ state.effective.appsec === 'block' ? $gettext('Blockieren konfiguriert') : state.effective.appsec === 'detection' ? $gettext('Beobachten konfiguriert') : state.effective.appsec === 'off' ? $gettext('Aus') : $gettext('Nicht bestätigt') }}</ATag>
         </div>
         <p class="muted">
           {{ $gettext('Combined excluded rule IDs') }}: {{ state.effective.modsecurity.excluded_rule_ids?.join(', ') || $gettext('None') }}
@@ -259,6 +261,9 @@ watch(() => props.name, () => {
           </AFormItem>
           <AFormItem :label="$gettext('CrowdSec enforcement for this website')" :help="$gettext('Wendet vorhandene CrowdSec-Entscheidungen auf Besucher dieser Website an. Aus deaktiviert hier die Durchsetzung, löscht aber keine zentralen Entscheidungen und ändert keine Community-Meldungen.')">
             <ASelect v-model:value="policy.crowdsec" :options="[{ value: 'inherit', label: $gettext('Inherit global setting') }, { value: 'on', label: $gettext('Enforce CrowdSec decisions') }, { value: 'off', label: $gettext('Do not enforce CrowdSec decisions') }]" />
+          </AFormItem>
+          <AFormItem :label="$gettext('CrowdSec AppSec für diese Website')" :help="$gettext('Prüft einzelne HTTP-Anfragen direkt mit AppSec-Regeln, unabhängig von bestehenden IP-Sperren und ModSecurity. Beobachten meldet Treffer ohne AppSec-Blockierung; Blockieren kann Anfragen ablehnen. Vererben folgt dem globalen AppSec-Modus. Anschließend synchronisieren und echte Anfragen prüfen: die gespeicherte Auswahl allein bestätigt keine laufende Prüfung.')">
+            <ASelect v-model:value="policy.appsec" :options="[{ value: 'inherit', label: $gettext('Globalen Wert übernehmen') }, { value: 'off', label: $gettext('Aus – keine AppSec-Prüfung') }, { value: 'detection', label: $gettext('Beobachten – ohne AppSec-Sperren') }, { value: 'block', label: $gettext('Blockieren – Treffer durchsetzen') }]" />
           </AFormItem>
           <AFormItem :label="$gettext('Prüfstrenge (Paranoia-Level)')" :help="$gettext('1 ist der empfohlene Einstieg. 2 bis 4 ergänzen strengere Regeln und können mehr legitime Anfragen fälschlich erkennen. „Globalen Wert übernehmen“ folgt den zentralen Einstellungen.')">
             <ASelect
@@ -291,7 +296,7 @@ watch(() => props.name, () => {
         <AFormItem :label="$gettext('ModSecurity: IP-Ausnahmen (Whitelist)')" :help="!validAllowlistDraft(parseAllowlist(modsecurityAllowlist)) ? $gettext('Bitte höchstens 400 IPv4-/IPv6-Adressen oder CIDR-Netze eingeben, ohne Hostnamen oder Regeltext.') : $gettext('Anfragen dieser Quelladressen überspringen die ModSecurity-Prüfung vollständig, einschließlich eigener Pfadsperren. CrowdSec bleibt unabhängig davon wirksam.')" :validate-status="!validAllowlistDraft(parseAllowlist(modsecurityAllowlist)) ? 'error' : undefined">
           <ATextarea v-model:value="modsecurityAllowlist" :rows="3" placeholder="192.0.2.10&#10;2001:db8::/64" />
         </AFormItem>
-        <AFormItem :label="$gettext('CrowdSec: IP-Ausnahmen (Whitelist)')" :help="!validAllowlistDraft(parseAllowlist(crowdsecAllowlist)) ? $gettext('Bitte höchstens 400 IPv4-/IPv6-Adressen oder CIDR-Netze eingeben, ohne Hostnamen oder Regeltext.') : $gettext('Für diese Quelladressen setzt Nginx keine CrowdSec-Sperren durch. Zentrale Entscheidungen, Erkennung und Community-Meldungen werden dadurch nicht gelöscht oder abgeschaltet. ModSecurity bleibt unabhängig aktiv.')" :validate-status="!validAllowlistDraft(parseAllowlist(crowdsecAllowlist)) ? 'error' : undefined">
+        <AFormItem :label="$gettext('CrowdSec: IP-Ausnahmen (Whitelist)')" :help="!validAllowlistDraft(parseAllowlist(crowdsecAllowlist)) ? $gettext('Bitte höchstens 400 IPv4-/IPv6-Adressen oder CIDR-Netze eingeben, ohne Hostnamen oder Regeltext.') : $gettext('Für diese Quelladressen überspringt Nginx CrowdSec-IP-Sperren und die AppSec-Anfrageprüfung. Zentrale Entscheidungen, Erkennung und Community-Meldungen werden dadurch nicht gelöscht oder abgeschaltet. ModSecurity bleibt unabhängig aktiv.')" :validate-status="!validAllowlistDraft(parseAllowlist(crowdsecAllowlist)) ? 'error' : undefined">
           <ATextarea v-model:value="crowdsecAllowlist" :rows="3" placeholder="192.0.2.10&#10;2001:db8::/64" />
         </AFormItem>
         <p class="muted">

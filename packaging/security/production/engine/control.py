@@ -158,6 +158,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body=json.loads(self.rfile.read(length)) if length else {}
             with LOCK:
                 if self.command=='GET' and self.path=='/sharing':result=sharing()
+                elif self.command=='GET' and self.path=='/appsec':
+                    import appsec
+                    result=appsec.inventory(sys.modules[__name__])
+                elif self.command=='PUT' and self.path=='/appsec' and isinstance(body,dict) and set(body)=={'enabled'} and type(body['enabled']) is bool:
+                    import appsec
+                    result=appsec.set_enabled(sys.modules[__name__],body['enabled'])
                 elif self.command=='GET' and self.path=='/hub-updates':
                     import hub_update
                     result=hub_update.read_status()

@@ -9,6 +9,8 @@ export interface CrowdSecSharing {
   applied?: boolean
 }
 
+export type AppSecMode = 'off' | 'detection' | 'block'
+
 export interface SecurityStatus {
   enabled: boolean
   crowdsec_enabled: boolean
@@ -16,9 +18,37 @@ export interface SecurityStatus {
   events_configured: boolean
   scenario_changes_enabled: boolean
   runtime_integration_verified: boolean
+  appsec_enabled?: boolean
+}
+
+export interface AppSecHubItem {
+  name: string
+  description?: string
+  version?: string
+  status?: string
+  available: boolean
+  installed: boolean
+  loaded?: boolean | null
+  update_available?: boolean
+  tainted?: boolean
+}
+
+export interface AppSecStatus {
+  enabled: boolean
+  ready: boolean
+  detection_ready?: boolean
+  detection_listen_addr?: string
+  listen_addr?: string
+  configs: AppSecHubItem[]
+  collections: AppSecHubItem[]
+  rules: AppSecHubItem[]
+  rule_count: number
+  runtime_integration_verified?: boolean
+  site_counts?: { off: number, detection: number, block: number }
 }
 
 export interface ModSecurityConfig {
+  appsec_mode?: AppSecMode
   crowdsec_enabled: boolean
   mode: 'Off' | 'DetectionOnly' | 'On'
   paranoia_level: number
@@ -41,6 +71,7 @@ export interface RuleException {
 }
 
 export interface SiteSecurityPolicy {
+  appsec?: 'inherit' | AppSecMode
   modsecurity: 'inherit' | ModSecurityConfig['mode']
   crowdsec: 'inherit' | 'on' | 'off'
   exceptions: RuleException[]
@@ -66,7 +97,7 @@ export interface SiteSecurityState {
   owner: string
   replica: boolean
   policy: SiteSecurityPolicy
-  effective: { modsecurity: ModSecurityConfig, crowdsec: boolean }
+  effective: { modsecurity: ModSecurityConfig, crowdsec: boolean, appsec?: AppSecMode }
 }
 
 export interface SecurityEvent {
@@ -110,6 +141,7 @@ const base = '/security-center'
 const options = {}
 
 export default {
+  appsec: (): Promise<AppSecStatus> => http.get(`${base}/crowdsec/appsec`, options),
   sharing: (): Promise<CrowdSecSharing> => http.get(`${base}/crowdsec/sharing`, options),
   saveSharing: (enabled: boolean): Promise<CrowdSecSharing> => http.put(`${base}/crowdsec/sharing`, { enabled }, options),
   templates: (): Promise<{ items: SecurityTemplate[] }> => http.get(`${base}/templates`, options),

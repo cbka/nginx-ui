@@ -145,3 +145,32 @@ The production rollout deliberately changes `cscli.hub_branch` from the initial
 commit pin to `master` in both the persisted configuration and the initialization
 ConfigMap. Leaving the initial pin would only refresh that historical snapshot.
 The scheduler does not change this configuration implicitly.
+
+## AppSec virtual patching
+
+Authenticated `GET /appsec` reports the official Hub catalog (`available`), installed
+activation (`installed`), versions and status. `loaded: true` is reported only for
+installed base-config/vpatch rules when both listeners are ready and a startup
+receipt proves the current CrowdSec PID/start time/boot ID and unchanged rule and
+configuration fingerprints. Other rules or unverified processes return `loaded: null`.
+This proves engine loading, not that NGINX traffic used AppSec; the plugin reports
+traffic integration separately.
+
+Explicit deployment bootstrap `PUT /appsec {"enabled":true}` installs
+`crowdsecurity/appsec-virtual-patching`, validates and restarts transactionally.
+Allow up to 210 seconds for the initial download. No automatic activation happens
+at image startup. `false` removes the two managed acquisition files; rules remain
+installed for future use and hourly updates. CAPI settings are unchanged.
+
+Private listeners (never publish externally):
+- 7422: official `crowdsecurity/virtual-patching`, blocking response.
+- 7423: managed detection configuration, same virtual-patching rules, with
+  `CancelAlert()` and `CancelEvent()` to prevent downstream LAPI bans. It retains
+  the internal rejection response as a match signal; NGINX **must not enforce**
+  this response in detection mode, and must log it locally instead.
+
+The bridge accepts `appsec status`, `appsec enable`, and `appsec disable` only.
+Hourly upgrades retain genuinely new dependencies introduced by the official
+virtual-patching collection, but never reactivate previously known disabled
+entries or unrelated scenarios. Lookup data and configuration roll back together
+on failed validation, without replacing live SQLite data.

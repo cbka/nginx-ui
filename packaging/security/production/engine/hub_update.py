@@ -109,10 +109,23 @@ def dataset_snapshot(control):
     finally:
         if not preserve:shutil.rmtree(backup)
 
+def virtual_patch_dependencies(index):
+    item=index.get('collections',{}).get('crowdsecurity/appsec-virtual-patching',{})
+    return {(kind,name) for kind in ACTIVE_DIRS for name in item.get(kind,[])
+            if isinstance(name,str) and name.startswith('crowdsecurity/')}
+
+def read_index(control):
+    path=pathlib.Path(control.config().get('config_paths',{}).get('index_path',control.CONFIG.parent/'hub/.index.json'))
+    if not path.exists():return {}
+    if path.stat().st_size>32*1024*1024:raise RuntimeError('Hub index exceeds limit')
+    return json.loads(path.read_text())
+
 def upgrade(control):
     root=control.CONFIG.parent
     config_before=control.CONFIG.read_bytes()
     before_fingerprint=active_fingerprint(root)
+    old_index=read_index(control)
+    patch_active=(root/'collections/appsec-virtual-patching.yaml').is_file()
     before_datasets=dataset_fingerprint(control)
     with tempfile.TemporaryDirectory(prefix='crowdsec-activation-') as temp:
         backup=pathlib.Path(temp)
@@ -124,6 +137,21 @@ def upgrade(control):
                 existing.add(name); shutil.copytree(path,backup/name,symlinks=True)
         control.invoke(['/usr/bin/cscli','hub','update'],timeout=180)
         control.invoke(['/usr/bin/cscli','hub','upgrade'],timeout=180)
+        # Only genuinely NEW dependencies in the official virtual-patching collection
+        # may become active automatically. Previously available but disabled entries
+        # remain disabled; all unrelated activation sets remain exact.
+        if patch_active:
+            current_index=read_index(control)
+            new_deps=virtual_patch_dependencies(current_index)-virtual_patch_dependencies(old_index)
+            for kind,item in new_deps:
+                if item in old_index.get(kind,{}):continue
+                meta=current_index.get(kind,{}).get(item,{})
+                remote=meta.get('path','')
+                for active in (root/kind).rglob('*'):
+                    if active.is_symlink() and active.resolve()==(root/'hub'/remote).resolve() and active.resolve().is_relative_to((root/'hub').resolve()):
+                        dest=backup/kind/active.relative_to(root/kind)
+                        dest.parent.mkdir(parents=True,exist_ok=True)
+                        dest.symlink_to(os.readlink(active));existing.add(kind)
         # Upgrade may install new collection dependencies. Preserve the exact
         # enabled set (including local files) and resolve symlinks to new Hub
         # versions. Incompatible new dependencies fail validation and roll back.

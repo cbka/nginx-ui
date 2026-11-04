@@ -14,6 +14,7 @@ import (
 const marker = "# nginx-ui-security-center: "
 
 type WAFConfig struct {
+	AppSecMode           string   `json:"appsec_mode,omitempty"`
 	ModSecurityAllowlist []string `json:"modsecurity_allowlist,omitempty"`
 	CrowdSecAllowlist    []string `json:"crowdsec_allowlist,omitempty"`
 	CrowdSecEnabled      bool     `json:"crowdsec_enabled"`
@@ -25,6 +26,9 @@ type WAFConfig struct {
 }
 
 func (c WAFConfig) Validate() error {
+	if !validAppSecMode(c.AppSecMode) {
+		return ErrInvalid
+	}
 	if _, err := mergeIPAllowlist(c.ModSecurityAllowlist); err != nil {
 		return err
 	}

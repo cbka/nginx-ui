@@ -33,5 +33,10 @@ test('model-less security forms bind the submit event actually emitted by Antdv'
         handlers.push(handler)
     }
   }
-  expect(handlers.sort()).toEqual(['addBan', 'apply', 'saveWaf'])
+  expect(handlers.sort()).toEqual([
+    'addBan',
+    'apply',
+    'saveWaf',
+    'saveWaf',
+  ])
 })

@@ -4,6 +4,7 @@ import type { ModSecurityConfig, SecurityEvent, SecuritySite, SecurityStatus } f
 import { ReloadOutlined } from '@antdv-next/icons'
 import security from '@/api/security_center'
 import { getErrorMessage, useSettingsStore } from '@/runtime'
+import AppSecPanel from './AppSecPanel.vue'
 import CommunitySharing from './CommunitySharing.vue'
 import { canManageSecurity, crowdsecListResult, normalizeDecisions, normalizeScenarios, parseExcludedRules } from './normalize'
 import SecurityEvents from './SecurityEvents.vue'
@@ -77,12 +78,10 @@ const wafPayload = computed(() => waf.value && excludedIds.value
     }
   : undefined)
 const wafDirty = computed(() => JSON.stringify(wafPayload.value) !== savedWaf.value)
-const unsaved = computed(() => selectedSite.value
-  ? siteDirty.value
-  : wafDirty.value && !!waf.value)
+const unsaved = computed(() => siteDirty.value || (wafDirty.value && !!waf.value))
 const wafValid = computed(() => {
   const config = wafPayload.value
-  return !!config && validAllowlistDraft(config.modsecurity_allowlist) && validAllowlistDraft(config.crowdsec_allowlist) && [1, 2, 3, 4].includes(config.paranoia_level)
+  return !!config && ['off', 'detection', 'block'].includes(config.appsec_mode ?? 'off') && validAllowlistDraft(config.modsecurity_allowlist) && validAllowlistDraft(config.crowdsec_allowlist) && [1, 2, 3, 4].includes(config.paranoia_level)
     && Number.isInteger(config.inbound_threshold) && config.inbound_threshold >= 1 && config.inbound_threshold <= 1000
     && Number.isInteger(config.outbound_threshold) && config.outbound_threshold >= 1 && config.outbound_threshold <= 1000
 })
@@ -108,6 +107,7 @@ async function loadWaf() {
   wafError.value = ''
   try {
     waf.value = await security.modsecurity()
+    waf.value.appsec_mode ??= 'off'
     exclusions.value = (waf.value.excluded_rule_ids ?? []).join(', ')
     modsecurityAllowlist.value = (waf.value.modsecurity_allowlist ?? []).join('\n')
     crowdsecAllowlist.value = (waf.value.crowdsec_allowlist ?? []).join('\n')
@@ -250,7 +250,7 @@ function saveWaf() {
   }
   modal.confirm({
     title: $gettext('Apply WAF configuration?'),
-    content: $gettext('Nginx configuration will be checked and reloaded. Off disables inspection; DetectionOnly records matches without blocking. Excluded rule IDs no longer protect requests. The CrowdSec default applies to websites that inherit it. IP allowlists bypass the respective protection; global allowlists also apply to websites with explicit settings.'),
+    content: $gettext('Nginx configuration will be checked and reloaded. Off disables inspection; DetectionOnly records matches without blocking. Excluded rule IDs no longer protect requests. The CrowdSec and AppSec defaults apply to websites that inherit them. AppSec detection records matches without blocking; block can reject requests. All global draft changes are saved together. IP allowlists bypass the respective protection; global allowlists also apply to websites with explicit settings.'),
     okText: $gettext('Validate and apply'),
     okButtonProps: { danger: payload.mode !== 'On' || !payload.crowdsec_enabled || payload.excluded_rule_ids.length > 0 || payload.modsecurity_allowlist.length > 0 || payload.crowdsec_allowlist.length > 0 },
     async onOk() {
@@ -421,6 +421,29 @@ onMounted(refresh)
             </div>
           </template>
         </ATabPane>
+        <ATabPane key="appsec" :tab="$gettext('CrowdSec AppSec')">
+          <AAlert v-if="!canCrowdsec" type="info" show-icon :message="$gettext('CrowdSec ist auf diesem Knoten nicht eingerichtet.')" />
+          <template v-else>
+            <AppSecPanel />
+            <AAlert v-if="wafError" type="error" show-icon :message="wafError" class="section-gap" />
+            <AAlert v-if="applied" type="warning" show-icon :message="applied" class="section-gap" />
+            <AForm v-if="canWaf && waf" layout="vertical" class="section-gap" @submit="saveWaf">
+              <AFormItem :label="$gettext('Globaler AppSec-Standard')" :help="$gettext('Gilt für Websites mit geerbtem AppSec-Modus. Aus beendet nur AppSec; Beobachten protokolliert ohne zu blockieren; Blockieren kann Angriffe abweisen. Dies schaltet nicht die zentrale Engine aus. Eigene Website-Einstellungen findest du unter WAF & website protection; AppSec ist dort unabhängig vom ModSecurity-Modus einstellbar.')">
+                <ASelect v-model:value="waf.appsec_mode" :disabled="busy || siteBusy || loading" :options="[{ value: 'off', label: $gettext('Aus') }, { value: 'detection', label: $gettext('Beobachten – nicht blockieren') }, { value: 'block', label: $gettext('Blockieren') }]" />
+              </AFormItem>
+              <p class="muted">
+                {{ $gettext('Beim Anwenden werden alle offenen globalen Änderungen gemeinsam gespeichert, auch aus dem WAF-Reiter. Anschließend betroffene Websites synchronisieren und die Prüfung mit Testverkehr bestätigen.') }}
+              </p>
+              <AButton type="primary" html-type="submit" :loading="busy" :disabled="loading || siteBusy || !wafValid || !wafDirty">
+                {{ $gettext('Validate and apply') }}
+              </AButton>
+              <AButton class="unsaved" :disabled="busy || loading || !wafDirty" @click="loadWaf">
+                {{ $gettext('Discard changes') }}
+              </AButton>
+            </AForm>
+            <AAlert v-else type="info" show-icon :message="$gettext('Die Richtlinienverwaltung benötigt die vollständige Sicherheitsintegration auf diesem Knoten. Der AppSec-Bestand oben bleibt unabhängig davon lesbar.')" class="section-gap" />
+          </template>
+        </ATabPane>
         <ATabPane key="modsecurity" :tab="$gettext('WAF & website protection')">
           <AFormItem :label="$gettext('Configuration scope')" :help="$gettext('Globale Vorgaben gelten für Websites, die sie erben. Wähle eine Website, um nur deren Schutz anzupassen.')">
             <ASelect v-model:value="selectedSite" :options="scopeOptions" show-search option-filter-prop="label" :disabled="!canWaf || busy || loading || siteBusy || unsaved" />
@@ -464,7 +487,7 @@ onMounted(refresh)
                 <AFormItem :label="$gettext('ModSecurity: IP-Ausnahmen (Whitelist)')" :help="!validAllowlistDraft(parseAllowlist(modsecurityAllowlist)) ? $gettext('Bitte höchstens 400 IPv4-/IPv6-Adressen oder CIDR-Netze eingeben, ohne Hostnamen oder Regeltext.') : $gettext('Anfragen dieser Quelladressen überspringen die ModSecurity-Prüfung vollständig, einschließlich eigener Pfadsperren. CrowdSec bleibt unabhängig davon wirksam.')" :validate-status="!validAllowlistDraft(parseAllowlist(modsecurityAllowlist)) ? 'error' : undefined">
                   <ATextarea v-model:value="modsecurityAllowlist" :rows="3" placeholder="192.0.2.10&#10;2001:db8::/64" />
                 </AFormItem>
-                <AFormItem :label="$gettext('CrowdSec: IP-Ausnahmen (Whitelist)')" :help="!validAllowlistDraft(parseAllowlist(crowdsecAllowlist)) ? $gettext('Bitte höchstens 400 IPv4-/IPv6-Adressen oder CIDR-Netze eingeben, ohne Hostnamen oder Regeltext.') : $gettext('Für diese Quelladressen setzt Nginx keine CrowdSec-Sperren durch. Zentrale Entscheidungen, Erkennung und Community-Meldungen werden dadurch nicht gelöscht oder abgeschaltet. ModSecurity bleibt unabhängig aktiv.')" :validate-status="!validAllowlistDraft(parseAllowlist(crowdsecAllowlist)) ? 'error' : undefined">
+                <AFormItem :label="$gettext('CrowdSec: IP-Ausnahmen (Whitelist)')" :help="!validAllowlistDraft(parseAllowlist(crowdsecAllowlist)) ? $gettext('Bitte höchstens 400 IPv4-/IPv6-Adressen oder CIDR-Netze eingeben, ohne Hostnamen oder Regeltext.') : $gettext('Für diese Quelladressen überspringt Nginx CrowdSec-IP-Sperren und die AppSec-Anfrageprüfung. Zentrale Entscheidungen, Erkennung und Community-Meldungen werden dadurch nicht gelöscht oder abgeschaltet. ModSecurity bleibt unabhängig aktiv.')" :validate-status="!validAllowlistDraft(parseAllowlist(crowdsecAllowlist)) ? 'error' : undefined">
                   <ATextarea v-model:value="crowdsecAllowlist" :rows="3" placeholder="192.0.2.10&#10;2001:db8::/64" />
                 </AFormItem>
                 <p class="muted">

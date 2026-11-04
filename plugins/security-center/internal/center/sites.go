@@ -27,6 +27,7 @@ type RuleException struct {
 	Parameter string `json:"parameter,omitempty"`
 }
 type SitePolicy struct {
+	AppSec               string          `json:"appsec,omitempty"`
 	ModSecurityAllowlist []string        `json:"modsecurity_allowlist,omitempty"`
 	CrowdSecAllowlist    []string        `json:"crowdsec_allowlist,omitempty"`
 	Exceptions           []RuleException `json:"exceptions"`
@@ -48,6 +49,7 @@ type SiteState struct {
 	Policy         SitePolicy `json:"policy"`
 }
 type EffectivePolicy struct {
+	AppSec      string    `json:"appsec"`
 	ModSecurity WAFConfig `json:"modsecurity"`
 	CrowdSec    bool      `json:"crowdsec"`
 }
@@ -168,7 +170,17 @@ func effectivePolicy(global WAFConfig, p SitePolicy) (EffectivePolicy, error) {
 	if err := c.Validate(); err != nil {
 		return EffectivePolicy{}, err
 	}
-	return EffectivePolicy{ModSecurity: c, CrowdSec: cs}, nil
+	appsec := global.AppSecMode
+	if appsec == "" {
+		appsec = "off"
+	}
+	if p.AppSec != "" && p.AppSec != "inherit" {
+		appsec = p.AppSec
+	}
+	if !validAppSecMode(appsec) {
+		return EffectivePolicy{}, ErrInvalid
+	}
+	return EffectivePolicy{ModSecurity: c, CrowdSec: cs, AppSec: appsec}, nil
 }
 func (s *Service) GetSite(name string) (SiteResponse, error) {
 	if err := s.waf(); err != nil {
@@ -383,6 +395,9 @@ func (s *Service) stateChanges(global WAFConfig, state SiteState) ([]fileChange,
 	if err != nil {
 		return nil, err
 	}
+	if effective.AppSec != "off" && (!s.Config.AppSecEnabled || !s.Config.CrowdSecEnabled) {
+		return nil, errors.New("CrowdSec AppSec runtime is not configured")
+	}
 	if effective.CrowdSec && !s.Config.CrowdSecEnabled {
 		return nil, errors.New("CrowdSec component is not configured")
 	}
@@ -412,7 +427,7 @@ func (s *Service) stateChanges(global WAFConfig, state SiteState) ([]fileChange,
 	if effective.ModSecurity.Mode == "Off" {
 		mode = "off"
 	}
-	snippetData := fmt.Sprintf("%smodsecurity %s;\nmodsecurity_rules_file %s;\nset $nginx_ui_crowdsec_enabled %s;\nset $nginx_ui_security_site_id %s;\nset $nginx_ui_crowdsec_allowlist \"%s\";\naccess_by_lua_file %s;\n", snippetMarker, mode, rules, flag, siteID, strings.Join(effective.ModSecurity.CrowdSecAllowlist, ","), accessHook)
+	snippetData := fmt.Sprintf("%smodsecurity %s;\nmodsecurity_rules_file %s;\nset $nginx_ui_crowdsec_enabled %s;\nset $crowdsec_disable_appsec 1;\nset $nginx_ui_appsec_mode %s;\nset $nginx_ui_security_site_id %s;\nset $nginx_ui_crowdsec_allowlist \"%s\";\naccess_by_lua_file %s;\n", snippetMarker, mode, rules, flag, effective.AppSec, siteID, strings.Join(effective.ModSecurity.CrowdSecAllowlist, ","), accessHook)
 	for _, owned := range []struct{ path, prefix string }{{rules, marker}, {snippet, snippetMarker}} {
 		if err := safeFile(owned.path); err != nil {
 			return nil, err
