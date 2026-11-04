@@ -803,3 +803,60 @@ func TestNginxStringCacheSerializesColdLoad(t *testing.T) {
 		t.Fatalf("loader called %d times, want once", got)
 	}
 }
+
+// The namespace inventory can contain both a website and its generated
+// maintenance entry. They select one enabled file, not two nginx servers.
+func TestCollectAndCopyDeduplicatesMaintenanceSelection(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reverse=%t", reverse), func(t *testing.T) {
+			withSandboxPaths(t, map[string]string{
+				"sites-enabled/example.conf_nginx_ui_maintenance": "server { listen 8080; server_name example.test; return 503; }\n",
+			}, func(confDir, sandboxDir string) {
+				paths := []string{
+					filepath.Join(confDir, "sites-available/example.conf"),
+					filepath.Join(confDir, "sites-available/example.conf_nginx_ui_maintenance"),
+				}
+				if reverse {
+					paths[0], paths[1] = paths[1], paths[0]
+				}
+				paths = append(paths, paths[0])
+				builder := newSandboxBuilder(sandboxDir)
+				sites, _, err := collectAndCopyNamespaceEnabled(nil, paths, nil, builder)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(sites) != 1 {
+					t.Fatalf("selected sites = %v, want exactly one maintenance config", sites)
+				}
+				entries, err := os.ReadDir(filepath.Join(sandboxDir, "sites-enabled"))
+				if err != nil || len(entries) != 1 {
+					t.Fatalf("sandbox contains %d files, err = %v; want one", len(entries), err)
+				}
+				config, err := generateSandboxConfig(nil, sites, nil, builder)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Count(config, "include ") != 1 {
+					t.Fatalf("expected a single include, got %s", config)
+				}
+			})
+		})
+	}
+}
+
+// Genuine duplicate enabled files must still reach nginx validation, even if
+// their contents are identical. Deduplication is of inventory selections only.
+func TestCollectAndCopyPreservesDistinctEnabledEntries(t *testing.T) {
+	withSandboxPaths(t, map[string]string{
+		"sites-enabled/example.conf":                      "server { listen 8080; server_name example.test; }\n",
+		"sites-enabled/example.conf_nginx_ui_maintenance": "server { listen 8080; server_name example.test; }\n",
+	}, func(confDir, sandboxDir string) {
+		sites, _, err := collectAndCopyNamespaceEnabled(nil, []string{
+			filepath.Join(confDir, "sites-available/example.conf"),
+			filepath.Join(confDir, "sites-available/example.conf_nginx_ui_maintenance"),
+		}, nil, newSandboxBuilder(sandboxDir))
+		if err != nil || len(sites) != 2 {
+			t.Fatalf("sites = %v, err = %v; want both live entries", sites, err)
+		}
+	})
+}

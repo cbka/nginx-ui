@@ -258,6 +258,11 @@ func writeSandboxIncludes(result *strings.Builder, includeLines []string) {
 func collectAndCopyNamespaceEnabled(_ *NamespaceInfo, sitePaths, streamPaths []string, builder *sandboxBuilder) (siteFiles, streamFiles []string, err error) {
 	const maintenanceSuffix = "_nginx_ui_maintenance"
 
+	// A website and its generated maintenance inventory entry can select the
+	// same enabled file. Include that selection once, but preserve different
+	// enabled entries so genuine live duplicate-server warnings remain visible.
+	selectedSources := make(map[string]struct{}, len(sitePaths)+len(streamPaths))
+
 	readSourceAndWrite := func(kind, relativePath string) (writtenName string, wErr error) {
 		enabledRoot := GetConfPath(kind + "s-enabled")
 		availableRoot := GetConfPath(kind + "s-available")
@@ -285,6 +290,11 @@ func collectAndCopyNamespaceEnabled(_ *NamespaceInfo, sitePaths, streamPaths []s
 			}
 		}
 		if selectedEnabledPath == "" {
+			return "", nil
+		}
+
+		selectionKey := kind + ":" + filepath.Clean(selectedEnabledPath)
+		if _, exists := selectedSources[selectionKey]; exists {
 			return "", nil
 		}
 
@@ -326,6 +336,7 @@ func collectAndCopyNamespaceEnabled(_ *NamespaceInfo, sitePaths, streamPaths []s
 		if err := os.WriteFile(destPath, []byte(rewritten), 0644); err != nil {
 			return "", fmt.Errorf("write sandbox %s: %w", kind, err)
 		}
+		selectedSources[selectionKey] = struct{}{}
 		return destName, nil
 	}
 
