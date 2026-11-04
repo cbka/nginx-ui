@@ -78,7 +78,11 @@ export function normalizeScenarios(input: unknown): Scenario[] {
         name,
         status,
         version: text(item.local_version || item.version || local.version),
-        installed: item.installed === true || local.installed === true || /enabled|installed|tainted|update.available/i.test(status),
+        installed: typeof item.installed === 'boolean'
+          ? item.installed
+          : typeof local.installed === 'boolean'
+            ? local.installed
+            : status.toLowerCase().split(/[,\s]+/).some(flag => flag === 'enabled' || flag === 'installed'),
       },
     ]
   })

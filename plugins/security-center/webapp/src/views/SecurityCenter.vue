@@ -437,7 +437,6 @@ onMounted(refresh)
         <ATabPane key="appsec" :tab="$gettext('CrowdSec AppSec')">
           <AAlert v-if="!canCrowdsec" type="info" show-icon :message="$gettext('CrowdSec ist auf diesem Knoten nicht eingerichtet.')" />
           <template v-else>
-            <AppSecPanel />
             <AAlert v-if="wafError" type="error" show-icon :message="wafError" class="section-gap" />
             <AAlert v-if="applied" type="warning" show-icon :message="applied" class="section-gap" />
             <AForm v-if="canWaf && waf" layout="vertical" class="section-gap" @submit="saveWaf">
@@ -454,7 +453,8 @@ onMounted(refresh)
                 {{ $gettext('Discard changes') }}
               </AButton>
             </AForm>
-            <AAlert v-else type="info" show-icon :message="$gettext('Die Richtlinienverwaltung benötigt die vollständige Sicherheitsintegration auf diesem Knoten. Der AppSec-Bestand oben bleibt unabhängig davon lesbar.')" class="section-gap" />
+            <AAlert v-else type="info" show-icon :message="$gettext('Die Richtlinienverwaltung benötigt die vollständige Sicherheitsintegration auf diesem Knoten. Der AppSec-Bestand darunter bleibt unabhängig davon lesbar.')" class="section-gap" />
+            <AppSecPanel class="section-gap" />
           </template>
         </ATabPane>
         <ATabPane key="modsecurity" :tab="$gettext('WAF & website protection')">
