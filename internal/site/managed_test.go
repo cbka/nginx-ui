@@ -26,7 +26,7 @@ func setupManagedSiteTest(t *testing.T, name, managedBy string, enabled, mainten
 	require.NoError(t, model.UseDB().AutoMigrate(&model.Namespace{}, &model.Cert{}))
 
 	originalSyncDelete := syncDelete
-	syncDelete = func(context.Context, string) {}
+	syncDelete = func(context.Context, string) error { return nil }
 	t.Cleanup(func() {
 		WaitForSync()
 		syncDelete = originalSyncDelete

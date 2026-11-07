@@ -82,7 +82,18 @@ func (s *Service) states() ([]SiteState, error) {
 }
 
 // Deactivate is explicit only. It never erases desired policies, templates or bans.
-func (s *Service) Deactivate(ctx context.Context) error {
+func (s *Service) Deactivate(ctx context.Context) (err error) {
+	s.bulkMu.Lock()
+	defer s.bulkMu.Unlock()
+	s.bulkDisabled = true
+	defer func() {
+		if err != nil {
+			s.bulkDisabled = false
+		}
+	}()
+	if err := s.cancelBulkBeforeDeactivate(ctx); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expected = nil
@@ -129,7 +140,14 @@ func (s *Service) Deactivate(ctx context.Context) error {
 }
 
 // Activate restores saved policies after explicit disable, without revising ownership.
-func (s *Service) Activate(ctx context.Context) error {
+func (s *Service) Activate(ctx context.Context) (err error) {
+	s.bulkMu.Lock()
+	defer s.bulkMu.Unlock()
+	defer func() {
+		if err == nil {
+			s.bulkDisabled = false
+		}
+	}()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expected = nil

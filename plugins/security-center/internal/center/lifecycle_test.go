@@ -127,7 +127,10 @@ func TestDeactivateRejectsUnownedGlobalEnforcement(t *testing.T) {
 	if _, err := s.ApplySite(context.Background(), "a.conf", inheritedPolicy()); err != nil {
 		t.Fatal(err)
 	}
-	s.Run = func(context.Context, string, ...string) ([]byte, error) {
+	s.Run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if len(args) == 2 && args[0] == "bulk" && args[1] == "cancel" {
+			return []byte("null"), nil
+		}
 		return []byte("# configuration file /etc/nginx/nginx.conf:\nhttp { access_by_lua_file /unowned.lua; }\n"), nil
 	}
 	if s.Deactivate(context.Background()) == nil {
@@ -145,7 +148,10 @@ func TestDeactivateWithoutOwnedSitesLeavesUnownedLuaUntouched(t *testing.T) {
 	if err := os.WriteFile(path, content, 0600); err != nil {
 		t.Fatal(err)
 	}
-	s.Run = func(context.Context, string, ...string) ([]byte, error) {
+	s.Run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if len(args) == 2 && args[0] == "bulk" && args[1] == "cancel" {
+			return []byte("null"), nil
+		}
 		t.Fatal("no owned sites: must not inspect or reload unrelated Nginx configuration")
 		return nil, nil
 	}

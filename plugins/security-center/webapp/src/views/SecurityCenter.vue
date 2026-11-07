@@ -5,6 +5,7 @@ import { ReloadOutlined } from '@antdv-next/icons'
 import security from '@/api/security_center'
 import { getErrorMessage, useSettingsStore } from '@/runtime'
 import AppSecPanel from './AppSecPanel.vue'
+import BulkInstall from './BulkInstall.vue'
 import CommunitySharing from './CommunitySharing.vue'
 import { canManageSecurity, crowdsecListResult, normalizeDecisions, normalizeScenarios, parseExcludedRules } from './normalize'
 import { filterSecurityRows, paginateSecurityRows, SECURITY_PAGE_SIZE } from './pagination'
@@ -26,6 +27,8 @@ function assertCurrentNode() {
 const status = ref<SecurityStatus>()
 const loading = ref(false)
 const busy = ref(false)
+const scenarioBulkBusy = ref(false)
+const appsecBulkBusy = ref(false)
 const error = ref('')
 const decisionsError = ref('')
 const scenariosError = ref('')
@@ -231,6 +234,8 @@ function removeBan(item: Decision) {
 }
 
 function changeScenario(name: string, action: 'install' | 'remove') {
+  if (scenarioBulkBusy.value || appsecBulkBusy.value)
+    return
   modal.confirm({
     title: action === 'remove'
       ? $gettext('Remove scenario?')
@@ -241,6 +246,8 @@ function changeScenario(name: string, action: 'install' | 'remove') {
       : $gettext('Install'),
     okButtonProps: { danger: action === 'remove' },
     async onOk() {
+      if (scenarioBulkBusy.value || appsecBulkBusy.value)
+        throw new Error($gettext('Bitte die laufende Sammelinstallation zuerst abschließen lassen.'))
       await mutate(() => security.changeScenario(name.trim(), action), loadCrowdsec)
       scenarioName.value = ''
     },
@@ -401,9 +408,10 @@ onMounted(refresh)
               {{ $gettext('Szenarien erkennen Angriffsmuster in den gesammelten Logs, z. B. viele fehlgeschlagene Anmeldungen. Sie gelten für die zentrale Engine. Die Installation allein garantiert weder passende Eingangsdaten noch eine Sperre auf jeder Website. Verwende den exakten Namen aus dem CrowdSec Hub, z. B. crowdsecurity/http-probing.') }}
             </p>
             <AAlert v-if="!status.scenario_changes_enabled" type="info" show-icon :message="$gettext('Scenario changes are unavailable until a CrowdSec reload command is configured.')" class="section-gap" />
+            <BulkInstall kind="scenarios" :disabled="busy || loading || appsecBulkBusy || !status.scenario_changes_enabled" @busy="scenarioBulkBusy = $event" @completed="loadCrowdsec" />
             <div class="inline-form section-gap">
               <AInput v-model:value="scenarioName" placeholder="crowdsecurity/http-probing" :aria-label="$gettext('Scenario name')" />
-              <AButton :disabled="busy || loading || !status.scenario_changes_enabled || !scenarioName.trim()" @click="changeScenario(scenarioName, 'install')">
+              <AButton :disabled="busy || loading || scenarioBulkBusy || appsecBulkBusy || !status.scenario_changes_enabled || !scenarioName.trim()" @click="changeScenario(scenarioName, 'install')">
                 {{ $gettext('Install') }}
               </AButton>
             </div>
@@ -418,7 +426,7 @@ onMounted(refresh)
                   <tr v-for="item in paginatedScenarios.rows" :key="item.name">
                     <td>{{ item.name }}</td><td>{{ item.status || (item.installed ? $gettext('Installed') : $gettext('Available')) }}</td><td>{{ item.version }}</td>
                     <td>
-                      <AButton :danger="item.installed" size="small" :disabled="busy || loading || !status.scenario_changes_enabled" @click="changeScenario(item.name, item.installed ? 'remove' : 'install')">
+                      <AButton :danger="item.installed" size="small" :disabled="busy || loading || scenarioBulkBusy || appsecBulkBusy || !status.scenario_changes_enabled" @click="changeScenario(item.name, item.installed ? 'remove' : 'install')">
                         {{ item.installed ? $gettext('Remove') : $gettext('Install') }}
                       </AButton>
                     </td>
@@ -454,7 +462,7 @@ onMounted(refresh)
               </AButton>
             </AForm>
             <AAlert v-else type="info" show-icon :message="$gettext('Die Richtlinienverwaltung benötigt die vollständige Sicherheitsintegration auf diesem Knoten. Der AppSec-Bestand darunter bleibt unabhängig davon lesbar.')" class="section-gap" />
-            <AppSecPanel class="section-gap" />
+            <AppSecPanel class="section-gap" :other-busy="scenarioBulkBusy" @bulk-busy="appsecBulkBusy = $event" />
           </template>
         </ATabPane>
         <ATabPane key="modsecurity" :tab="$gettext('WAF & website protection')">

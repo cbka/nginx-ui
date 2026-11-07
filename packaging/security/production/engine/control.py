@@ -144,6 +144,21 @@ def configuration_transaction(operation, reload_required=lambda result: True, ro
     finally:
         if not preserve:shutil.rmtree(backup)
 
+def appsec_disable(body):
+    import appsec
+    return appsec.set_enabled(sys.modules[__name__],False)
+
+class BoundedServer(http.server.ThreadingHTTPServer):
+    slots=threading.BoundedSemaphore(16)
+    def process_request(self,request,address):
+        if not self.slots.acquire(blocking=False):
+            request.close();return
+        try:super().process_request(request,address)
+        except Exception:self.slots.release();raise
+    def process_request_thread(self,request,address):
+        try:super().process_request_thread(request,address)
+        finally:self.slots.release()
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
@@ -160,7 +175,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
             length=int(self.headers.get('Content-Length','0'))
             if not 0<=length<=MAX_BODY:raise ValueError()
             body=json.loads(self.rfile.read(length)) if length else {}
-            with LOCK:
+            # Bulk receipts remain readable while a worker owns the config lock.
+            if self.path.startswith('/bulk/'):
+                import bulk
+                if self.command=='GET' and self.path.startswith('/bulk/jobs/'):
+                    return self.send(200,bulk.status(self.path[len('/bulk/jobs/'):]))
+                if self.command=='POST' and self.path=='/bulk/cancel' and body=={}:
+                    return self.send(200,bulk.cancel())
+                if self.command=='POST' and self.path=='/bulk/jobs' and isinstance(body,dict) and set(body)=={'kind','preview_id'}:
+                    return self.send(200,bulk.start(sys.modules[__name__],body['kind'],body['preview_id']))
+                if self.command=='GET' and self.path.startswith('/bulk/preview/'):
+                    if not LOCK.acquire(blocking=False):return self.send(409,{'message':'Engine beschäftigt; später erneut versuchen'})
+                    try:return self.send(200,bulk.preview(sys.modules[__name__],self.path[len('/bulk/preview/'):]))
+                    finally:LOCK.release()
+                return self.send(400,{'message':'Unsupported bulk operation'})
+            if self.command=='PUT' and self.path=='/appsec' and body=={'enabled':False}:
+                import bulk
+                with bulk.STATE_LOCK:
+                    if bulk.DISABLING.is_set():return self.send(409,{'message':'AppSec disable already in progress'})
+                    bulk.DISABLING.set();bulk.CANCEL.set()
+                try:
+                    with LOCK:result=appsec_disable(body)
+                    return self.send(200,result)
+                finally:bulk.DISABLING.clear()
+            # Dashboard loads independent lists concurrently. Queue briefly behind
+            # short operations, while keeping total wait below the bridge deadline.
+            # Long bulk transactions still return busy; receipts bypass this lock.
+            if not LOCK.acquire(timeout=5):return self.send(409,{'message':'Engine beschäftigt; später erneut versuchen'})
+            try:
                 if self.command=='GET' and self.path=='/sharing':result=sharing()
                 elif self.command=='GET' and self.path=='/appsec':
                     import appsec
@@ -186,8 +228,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     result={'stdout':scenario_change(args) if mutation else invoke(['/usr/bin/cscli',*args])}
                     if mutation:result['engine_reloaded']=True
                 else:return self.send(400,{'message':'Unsupported operation'})
+            finally:LOCK.release()
             self.send(200,result)
-        except (ValueError,TypeError,KeyError):self.send(400,{'message':'Invalid request or engine configuration'})
+        except (ValueError,TypeError,KeyError) as err:
+            if self.path.startswith('/bulk/') and isinstance(err,ValueError):return self.send(400,{'message':str(err)[:256]})
+            self.send(400,{'message':'Invalid request or engine configuration'})
         except Exception:self.send(502,{'message':'Engine operation failed; verify current engine state before retrying'})
     do_GET=handle_request
     do_PUT=handle_request
@@ -196,8 +241,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 if __name__=='__main__':
     os.umask(0o077)
     control_token()
+    import bulk
+    if bulk.recover(sys.modules[__name__]):reload_engine()
     import hub_update
     threading.Thread(target=hub_update.scheduler,args=(sys.modules[__name__],),daemon=True,name='hub-updates').start()
-    server=http.server.HTTPServer(('0.0.0.0',8081),Handler)
+    server=BoundedServer(('0.0.0.0',8081),Handler)
     server.timeout=15
     server.serve_forever()

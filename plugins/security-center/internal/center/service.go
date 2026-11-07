@@ -25,6 +25,8 @@ type Service struct {
 	Config       Config
 	Run          Runner
 	mu           sync.Mutex
+	bulkMu       sync.Mutex
+	bulkDisabled bool
 	InstanceID   string
 	SiteResolver func(string) (string, error)
 	SiteLister   func() ([]string, error)

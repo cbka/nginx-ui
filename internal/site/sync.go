@@ -3,6 +3,12 @@ package site
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"sync"
+	"time"
 
 	"github.com/0xJacky/Nginx-UI/internal/nodeauth"
 	"github.com/0xJacky/Nginx-UI/model"
@@ -17,7 +23,7 @@ import (
 // A change that another node replicated here has no targets: the node where
 // it was made already fanned it out, and forwarding it again would loop.
 func getSyncData(ctx context.Context, name string) (nodes []*model.Node, postSyncAction, namespaceName string) {
-	if nodeauth.IsReplicated(ctx) {
+	if nodeauth.IsReplicated(ctx) || ctx.Value(localMutationKey{}) == true {
 		logger.Infof("Skipping site sync for a replicated change: site=%q", name)
 		return
 	}
@@ -92,4 +98,57 @@ func NewSyncResult(node string, siteName string, resp *resty.Response) (s *SyncR
 func (s *SyncResult) SetNewName(name string) *SyncResult {
 	s.NewName = name
 	return s
+}
+
+// LocalMutation suppresses intermediate replication in composite operations.
+// Only the final requested state should be sent to peers.
+type localMutationKey struct{}
+
+func LocalMutation(ctx context.Context) context.Context {
+	return context.WithValue(ctx, localMutationKey{}, true)
+}
+
+// syncFinalState waits for every peer before acknowledging a destructive state
+// transition. A failed peer leaves the controller metadata available for retry.
+func syncFinalState(ctx context.Context, name, action string) error {
+	nodes := getSyncNodes(ctx, name)
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	errs := make(chan error, len(nodes))
+	var wg sync.WaitGroup
+	for _, node := range nodes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			client := nodeauth.NewRestyClient(node)
+			client.SetBaseURL(node.URL)
+			req := client.R().SetContext(ctx)
+			path := "/api/sites/" + url.PathEscape(name)
+			var resp *resty.Response
+			var err error
+			if action == "delete" {
+				resp, err = req.Delete(path)
+			} else {
+				resp, err = req.Post(path + "/disable")
+			}
+			if err != nil {
+				errs <- fmt.Errorf("%s %s on %s: %w", action, name, node.Name, err)
+				return
+			}
+			if resp.StatusCode() != http.StatusOK {
+				body := resp.Body()
+				if len(body) > 4096 {
+					body = body[:4096]
+				}
+				errs <- fmt.Errorf("%s %s on %s failed (HTTP %d): %s", action, name, node.Name, resp.StatusCode(), body)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	var failures []error
+	for err := range errs {
+		failures = append(failures, err)
+	}
+	return errors.Join(failures...)
 }

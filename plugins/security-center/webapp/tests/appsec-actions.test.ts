@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs'
-import { runInNewContext } from 'node:vm'
 import { Transpiler } from 'bun'
 import { expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 
 function harness(response: { applied?: boolean, message: string }, fail = false) {
   const source = readFileSync(new URL('../src/views/AppSecPanel.vue', import.meta.url), 'utf8')
@@ -10,6 +10,8 @@ function harness(response: { applied?: boolean, message: string }, fail = false)
   const calls: unknown[] = []
   const node = { id: 0 }
   const component = runInNewContext(`${new Transpiler({ loader: 'ts' }).transformSync(script)}\n;({changeRule, busy, mutationError, resultMessage})`, {
+    defineProps: () => ({}),
+    defineEmits: () => () => {},
     ref: (value: unknown) => ({ value }),
     computed: (get: () => unknown) => ({
       get value() { return get() },

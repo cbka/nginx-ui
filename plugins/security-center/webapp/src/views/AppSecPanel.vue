@@ -2,9 +2,17 @@
 import type { AppSecHubItem, AppSecStatus } from '@/api/security_center'
 import security from '@/api/security_center'
 import { getErrorMessage, useSettingsStore } from '@/runtime'
+import BulkInstall from './BulkInstall.vue'
 import { canManageSecurity } from './normalize'
 import { filterSecurityRows, paginateSecurityRows, SECURITY_PAGE_SIZE } from './pagination'
 
+const props = defineProps<{ otherBusy?: boolean }>()
+const emit = defineEmits<{ bulkBusy: [value: boolean] }>()
+const bulkBusy = ref(false)
+function updateBulkBusy(value: boolean) {
+  bulkBusy.value = value
+  emit('bulkBusy', value)
+}
 const state = ref<AppSecStatus>()
 const loading = ref(false)
 const error = ref('')
@@ -34,7 +42,7 @@ const rows = computed(() => filterSecurityRows(state.value
   : [], search.value, item => `${item.name} ${item.description ?? ''} ${item.kind} ${item.version ?? ''}`))
 const paginated = computed(() => paginateSecurityRows(rows.value, page.value))
 async function changeRule(item: AppSecHubItem, action: 'install' | 'activate') {
-  if (busy.value || loading.value || item.editable !== true)
+  if (busy.value || loading.value || bulkBusy.value || props.otherBusy || item.editable !== true)
     return
   modal.confirm({
     title: action === 'install'
@@ -44,7 +52,7 @@ async function changeRule(item: AppSecHubItem, action: 'install' | 'activate') {
     async onOk() {
       if (!mounted || !canManageSecurity(settings.node.id) || settings.node.id !== initialNodeId)
         throw new Error($gettext('Bitte den lokalen Controller auswählen und das Security Center erneut öffnen.'))
-      if (busy.value)
+      if (busy.value || bulkBusy.value || props.otherBusy)
         return
       busy.value = item.name
       mutationError.value = ''
@@ -129,6 +137,7 @@ onMounted(refresh)
         </p>
         <p>{{ $gettext('Bei nicht erreichbarer Prüfung, zu großem Anfrageinhalt oder ungültiger Antwort lässt diese Integration die Anfrage weiterlaufen und protokolliert einen Prüfungsfehler. Bestehende IP-Sperren und ModSecurity bleiben unabhängig wirksam. CrowdSec-IP-Ausnahmen überspringen auch AppSec. Beobachten verwendet einen separaten Listener, damit Treffer keine neuen zentralen Sperren erzeugen.') }}</p>
         <p>{{ $gettext('Installieren und aktivieren legt die Regel auf der Engine ab und lädt sie sofort. Aktivieren lädt bereits installierte Regeln des Virtual-Patching-Profils neu. Sammlungen, Konfigurationen und Regeln anderer Profile werden hier nur angezeigt; ihre Aktivierung erfordert eine passende Engine-Konfiguration. Geladen bedeutet noch nicht Blockieren: Das legt die Website-Richtlinie fest.') }}</p>
+        <BulkInstall kind="appsec" :disabled="!!busy || loading || otherBusy" @busy="updateBulkBusy" @completed="refresh" />
         <AInput v-model:value="search" allow-clear :placeholder="$gettext('Sammlungen, Konfigurationen und Regeln suchen')" :aria-label="$gettext('AppSec-Einträge suchen')" class="appsec-search" />
         <p aria-live="polite">
           {{ $gettext('%{count} passende Einträge · 20 pro Seite', { count: String(rows.length) }) }}
@@ -145,7 +154,7 @@ onMounted(refresh)
                 <td>{{ item.loaded === true ? $gettext('Bestätigt') : item.loaded === false ? $gettext('Nicht geladen') : $gettext('Nicht bestätigt') }}</td>
                 <td>{{ item.version || '—' }}</td>
                 <td>
-                  <AButton v-if="item.kind === 'rule' && item.editable === true && (!item.installed || item.loaded !== true)" size="small" :loading="busy === item.name" :disabled="!!busy || loading" @click="changeRule(item, item.installed ? 'activate' : 'install')">
+                  <AButton v-if="item.kind === 'rule' && item.editable === true && (!item.installed || item.loaded !== true)" size="small" :loading="busy === item.name" :disabled="!!busy || loading || bulkBusy || otherBusy" @click="changeRule(item, item.installed ? 'activate' : 'install')">
                     {{ item.installed ? $gettext('Aktivieren') : $gettext('Installieren und aktivieren') }}
                   </AButton>
                   <ATag v-else-if="item.kind === 'rule' && item.loaded === true" color="green">

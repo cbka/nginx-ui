@@ -138,10 +138,44 @@ export interface SecurityMutation {
   applied?: boolean
 }
 
+export type SecurityBulkKind = 'scenarios' | 'appsec'
+export type SecurityBulkAction = 'install' | 'activate' | 'skip'
+export interface SecurityBulkItem {
+  name: string
+  action: SecurityBulkAction
+  reason: string
+  state?: 'pending' | 'installing' | 'staged' | 'succeeded' | 'skipped' | 'failed' | 'rolled_back'
+}
+export interface SecurityBulkPreview {
+  kind: SecurityBulkKind
+  preview_id: string
+  items: SecurityBulkItem[]
+  eligible_count: number
+  skipped_count: number
+}
+export interface SecurityBulkJob {
+  id: string
+  kind: SecurityBulkKind
+  state: 'queued' | 'running' | 'validating' | 'succeeded' | 'failed' | 'interrupted'
+  completed: number
+  total: number
+  items: SecurityBulkItem[]
+  message: string
+  created_at: string
+  updated_at: string
+}
+
 const base = '/security-center'
 const options = {}
 
 export default {
+  bulkPreview: (kind: SecurityBulkKind): Promise<SecurityBulkPreview> => http.get(`${base}/crowdsec/bulk/preview`, {
+    ...options,
+    params: { kind },
+  }),
+  startBulk: (kind: SecurityBulkKind, previewId: string): Promise<SecurityBulkJob> => http.post(`${base}/crowdsec/bulk/jobs`, { kind, preview_id: previewId }, options),
+  bulkJob: (id: string): Promise<SecurityBulkJob> => http.get(`${base}/crowdsec/bulk/jobs/${encodeURIComponent(id)}`, options),
+  currentBulkJob: (): Promise<SecurityBulkJob | null> => http.get(`${base}/crowdsec/bulk/jobs/current`, options),
   changeAppSecRule: (name: string, action: 'install' | 'activate'): Promise<SecurityMutation> => http.post(`${base}/crowdsec/appsec/rules`, { name, action }, options),
   appsec: (): Promise<AppSecStatus> => http.get(`${base}/crowdsec/appsec`, options),
   sharing: (): Promise<CrowdSecSharing> => http.get(`${base}/crowdsec/sharing`, options),

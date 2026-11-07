@@ -21,6 +21,9 @@ func siteService(t *testing.T) *Service {
 		}
 	}
 	s.Run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if len(args) == 2 && args[0] == "bulk" && args[1] == "cancel" {
+			return []byte("null"), nil
+		}
 		dump := fmt.Sprintf("# configuration file /etc/nginx/nginx.conf:\nevents {}\nhttp { include %s/*.conf; }\n", root)
 		for _, name := range []string{"a.conf", "b.conf"} {
 			path, _ := s.sitePath(name)

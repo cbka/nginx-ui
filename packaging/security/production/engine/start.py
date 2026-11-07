@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import json,os,pathlib
+import control,bulk
+bulk.recover(control)
 c=json.loads(pathlib.Path('/etc/crowdsec/config.yaml').read_text())
 enabled=c['api']['server']['online_client']['sharing']
 if type(enabled) is not bool:raise SystemExit('Sharing must be an explicit boolean')

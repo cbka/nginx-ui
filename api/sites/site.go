@@ -395,7 +395,7 @@ func enableSiteByName(ctx context.Context, name string, opts ...site.MutateOptio
 }
 
 func disableSiteByName(ctx context.Context, name string, opts ...site.MutateOption) error {
-	if err := disableMaintenanceIfExists(ctx, name, opts...); err != nil {
+	if err := disableMaintenanceIfExists(site.LocalMutation(ctx), name, opts...); err != nil {
 		return err
 	}
 

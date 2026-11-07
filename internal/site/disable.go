@@ -2,17 +2,9 @@ package site
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"runtime"
-	"sync"
-
 	"github.com/0xJacky/Nginx-UI/internal/event"
 	"github.com/0xJacky/Nginx-UI/internal/nginx"
-	"github.com/0xJacky/Nginx-UI/internal/nodeauth"
-	"github.com/0xJacky/Nginx-UI/internal/notification"
 	"github.com/0xJacky/Nginx-UI/model"
-	"github.com/uozi-tech/cosy/logger"
 )
 
 // Disable disables a site by removing the symlink in sites-enabled. A site
@@ -33,7 +25,9 @@ func Disable(ctx context.Context, name string, opts ...MutateOption) (err error)
 			return
 		}
 
-		startSync(func() { syncDisable(ctx, name) })
+		if err = syncDisable(ctx, name); err != nil {
+			return err
+		}
 		event.PublishSiteDisabled(name)
 
 		return
@@ -46,7 +40,7 @@ func Disable(ctx context.Context, name string, opts ...MutateOption) (err error)
 		return err
 	}
 	if !enabledExists {
-		return
+		return syncDisable(ctx, name)
 	}
 
 	err = nginx.Remove(enabledConfigFilePath)
@@ -66,44 +60,14 @@ func Disable(ctx context.Context, name string, opts ...MutateOption) (err error)
 		return res.GetError()
 	}
 
-	startSync(func() { syncDisable(ctx, name) })
+	if err = syncDisable(ctx, name); err != nil {
+		return err
+	}
 	event.PublishSiteDisabled(name)
 
 	return
 }
 
-func syncDisable(ctx context.Context, name string) {
-	nodes := getSyncNodes(ctx, name)
-
-	wg := &sync.WaitGroup{}
-	wg.Add(len(nodes))
-
-	for _, node := range nodes {
-		go func() {
-			defer func() {
-				if err := recover(); err != nil {
-					buf := make([]byte, 1024)
-					runtime.Stack(buf, false)
-					logger.Errorf("%s\n%s", err, buf)
-				}
-			}()
-			defer wg.Done()
-
-			client := nodeauth.NewRestyClient(node)
-			client.SetBaseURL(node.URL)
-			resp, err := client.R().
-				Post(fmt.Sprintf("/api/sites/%s/disable", name))
-			if err != nil {
-				notification.Error("Disable Remote Site Error", err.Error(), nil)
-				return
-			}
-			if resp.StatusCode() != http.StatusOK {
-				notification.Error("Disable Remote Site Error", "Disable site %{name} from %{node} failed", NewSyncResult(node.Name, name, resp))
-				return
-			}
-			notification.Success("Disable Remote Site Success", "Disable site %{name} from %{node} successfully", NewSyncResult(node.Name, name, resp))
-		}()
-	}
-
-	wg.Wait()
+func syncDisable(ctx context.Context, name string) error {
+	return syncFinalState(ctx, name, "disable")
 }

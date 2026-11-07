@@ -2,16 +2,11 @@ package site
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"runtime"
-
 	"github.com/0xJacky/Nginx-UI/internal/nginx"
 	"github.com/0xJacky/Nginx-UI/internal/nodeauth"
-	"github.com/0xJacky/Nginx-UI/internal/notification"
 	"github.com/0xJacky/Nginx-UI/model"
 	"github.com/0xJacky/Nginx-UI/query"
-	"github.com/uozi-tech/cosy/logger"
+	"os"
 )
 
 // syncDelete dispatches the delete request to the site's sync nodes. It is a
@@ -42,7 +37,7 @@ func Delete(ctx context.Context, name string, opts ...MutateOption) (err error) 
 	if err != nil {
 		return err
 	}
-	if !availableExists {
+	if !availableExists && !nodeauth.IsReplicated(ctx) {
 		return ErrSiteNotFound
 	}
 
@@ -79,9 +74,22 @@ func Delete(ctx context.Context, name string, opts ...MutateOption) (err error) 
 
 	// The sync nodes are resolved from the site record, so dispatch before the
 	// record is deleted.
-	syncDelete(ctx, name)
+	if err = syncDelete(ctx, name); err != nil {
+		return err
+	}
 
-	_, err = s.Where(s.Path.Eq(availablePath)).Unscoped().Delete(&model.Site{})
+	// Full synchronization of a generated maintenance configuration may have
+	// registered its filename as a site. Remove only the exact orphan metadata:
+	// never a real config, an enabled site, or an ingress-owned record.
+	orphanPath, cleanupErr := orphanMaintenanceMetadataPath(name)
+	if cleanupErr != nil {
+		return cleanupErr
+	}
+	deleteQuery := model.UseDB().Where("path = ?", availablePath)
+	if orphanPath != "" {
+		deleteQuery = deleteQuery.Or("path = ? AND (managed_by = ? OR managed_by IS NULL) AND (remote_enabled = ? OR remote_enabled IS NULL)", orphanPath, "", false)
+	}
+	err = deleteQuery.Unscoped().Delete(&model.Site{}).Error
 	if err != nil {
 		return
 	}
@@ -89,34 +97,40 @@ func Delete(ctx context.Context, name string, opts ...MutateOption) (err error) 
 	certModel := model.Cert{Filename: name}
 	_ = certModel.Remove()
 
-	return nginx.Remove(availablePath)
+	if availableExists {
+		return nginx.Remove(availablePath)
+	}
+	return nil
 }
 
-func dispatchSyncDelete(ctx context.Context, name string) {
-	nodes := getSyncNodes(ctx, name)
+func dispatchSyncDelete(ctx context.Context, name string) error {
+	return syncFinalState(ctx, name, "delete")
+}
 
-	for _, node := range nodes {
-		go func() {
-			defer func() {
-				if err := recover(); err != nil {
-					buf := make([]byte, 1024)
-					runtime.Stack(buf, false)
-					logger.Errorf("%s\n%s", err, buf)
-				}
-			}()
-			client := nodeauth.NewRestyClient(node)
-			client.SetBaseURL(node.URL)
-			resp, err := client.R().
-				Delete(fmt.Sprintf("/api/sites/%s", name))
-			if err != nil {
-				notification.Error("Delete Remote Site Error", err.Error(), nil)
-				return
-			}
-			if resp.StatusCode() != http.StatusOK {
-				notification.Error("Delete Remote Site Error", "Delete site %{name} from %{node} failed", NewSyncResult(node.Name, name, resp))
-				return
-			}
-			notification.Success("Delete Remote Site Success", "Delete site %{name} from %{node} successfully", NewSyncResult(node.Name, name, resp))
-		}()
+// orphanMaintenanceMetadataPath identifies metadata left by synchronization,
+// not an existing independently configured site with a similar name.
+func orphanMaintenanceMetadataPath(name string) (string, error) {
+	generated := name + MaintenanceSuffix
+	available, err := ResolveAvailablePath(generated)
+	if err != nil {
+		return "", nil
+	} // Never clean a suffix path that cannot be resolved safely.
+	enabled, err := resolveEnabledSymlinkPath(generated)
+	if err != nil {
+		return "", err
 	}
+	maintenance, err := ResolveEnabledMaintenancePath(generated)
+	if err != nil {
+		return "", nil
+	}
+	for _, path := range []string{available, enabled, maintenance} {
+		_, statErr := nginx.Lstat(path)
+		if statErr == nil {
+			return "", nil
+		}
+		if !os.IsNotExist(statErr) {
+			return "", statErr
+		}
+	}
+	return available, nil
 }

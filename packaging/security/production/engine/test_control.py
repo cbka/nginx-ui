@@ -27,6 +27,26 @@ class TestControl(unittest.TestCase):
      self.assertEqual(request('Bearer '+'a'*64,['scenarios','list','-o','json']),200)
      invoke.assert_called_once_with(['/usr/bin/cscli','scenarios','list','-o','json'])
     finally:server.shutdown();server.server_close();thread.join()
+ def test_parallel_dashboard_reads_wait_for_short_operation(self):
+  import concurrent.futures,time
+  entered=threading.Event();release=threading.Event()
+  def invoke(*args):
+   entered.set();release.wait(1);return '[]'
+  with patch.object(c,'control_token',return_value='a'*64),patch.object(c,'invoke',side_effect=invoke):
+   server=c.BoundedServer(('127.0.0.1',0),c.Handler)
+   thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+   def request():
+    con=http.client.HTTPConnection(*server.server_address,timeout=3)
+    try:
+     con.request('POST','/cscli',json.dumps({'args':['scenarios','list','-o','json']}),{'Authorization':'Bearer '+'a'*64})
+     r=con.getresponse();r.read();return r.status
+    finally:con.close()
+   try:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2)as pool:
+     first=pool.submit(request);self.assertTrue(entered.wait(1))
+     second=pool.submit(request);time.sleep(.1);release.set()
+     self.assertEqual([first.result(),second.result()],[200,200])
+   finally:release.set();server.shutdown();server.server_close();thread.join()
  def test_sharing_rollback(self):
   initial={'api':{'server':{'online_client':{'sharing':True}}}}
   with tempfile.TemporaryDirectory() as d:

@@ -3,6 +3,10 @@ package site
 import (
 	"context"
 	"errors"
+	"github.com/0xJacky/Nginx-UI/internal/nodeauth"
+	"github.com/stretchr/testify/require"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,8 +58,9 @@ func setupDeleteTest(t *testing.T) *deleteTestEnv {
 	env.db = database
 
 	originalSyncDelete := syncDelete
-	syncDelete = func(_ context.Context, name string) {
+	syncDelete = func(_ context.Context, name string) error {
 		env.syncedNames = append(env.syncedNames, name)
+		return nil
 	}
 	t.Cleanup(func() {
 		syncDelete = originalSyncDelete
@@ -188,5 +193,65 @@ func TestDeleteDisabledSiteRemovesEverything(t *testing.T) {
 	}
 	if _, err := os.Stat(siteModel.Path); !os.IsNotExist(err) {
 		t.Fatalf("site file stat error = %v, want not exist", err)
+	}
+}
+
+func TestDeleteRemoteFailureKeepsRetryMetadata(t *testing.T) {
+	env := setupDeleteTest(t)
+	name := "retry.example.com"
+	record := env.addSite(t, name, 0, false)
+	failure := errors.New("peer is still enabled")
+	syncDelete = func(context.Context, string) error { return failure }
+	err := Delete(context.Background(), name)
+	env.assertRefusedWithoutSideEffects(t, name, record, err, failure)
+}
+
+func TestReplicatedDeleteAlreadyAbsentIsIdempotent(t *testing.T) {
+	setupDeleteTest(t)
+	req := httptest.NewRequest(http.MethodDelete, "/api/sites/missing.example.com", nil)
+	req.Header.Set(nodeauth.ReplicatedFromHeader, `"22222222-2222-4222-8222-222222222222"`)
+	ctx := nodeauth.WithPrincipal(req, &nodeauth.Principal{AuthMethod: model.NodeAuthMethodLegacy}).Context()
+	require.NoError(t, Delete(ctx, "missing.example.com"))
+	require.ErrorIs(t, Delete(context.Background(), "missing.example.com"), ErrSiteNotFound)
+}
+
+func TestDeleteCleansOnlyOrphanGeneratedMaintenanceMetadata(t *testing.T) {
+	for _, kind := range []string{"orphan", "real-config", "managed", "remote-enabled", "dangling-link", "remote-failure"} {
+		t.Run(kind, func(t *testing.T) {
+			env := setupDeleteTest(t)
+			name := "cleanup.example.com"
+			env.addSite(t, name, 0, false)
+			generatedPath := filepath.Join(env.availableDir, name+MaintenanceSuffix)
+			generated := model.Site{Path: generatedPath}
+			if kind == "remote-enabled" {
+				generated.RemoteEnabled = true
+			}
+			if kind == "managed" {
+				generated.ManagedBy = "ingress:protected"
+			}
+			require.NoError(t, env.db.Create(&generated).Error)
+			if kind == "real-config" {
+				require.NoError(t, os.WriteFile(generatedPath, []byte("server {}"), 0644))
+			}
+			if kind == "dangling-link" {
+				require.NoError(t, os.Symlink(generatedPath, filepath.Join(env.enabledDir, name+MaintenanceSuffix)))
+			}
+			if kind == "remote-failure" {
+				syncDelete = func(context.Context, string) error { return errors.New("peer unavailable") }
+			}
+			err := Delete(context.Background(), name)
+			if kind == "remote-failure" {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			var count int64
+			require.NoError(t, env.db.Unscoped().Model(&model.Site{}).Where("path = ?", generatedPath).Count(&count).Error)
+			if kind == "orphan" {
+				require.Zero(t, count)
+			} else {
+				require.EqualValues(t, 1, count)
+			}
+		})
 	}
 }
