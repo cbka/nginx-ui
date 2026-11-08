@@ -44,6 +44,9 @@ func ProxyWs() gin.HandlerFunc {
 			logger.Error(err)
 			return
 		}
+		if refuseDisabledProxyNode(c, node) {
+			return
+		}
 
 		// Build the target from the parsed URL, which is the path the route
 		// was matched and authorized on. Re-parsing the raw request URI would
