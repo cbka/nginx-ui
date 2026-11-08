@@ -23,10 +23,11 @@ def rows(control, kind):
         if not isinstance(item,dict) or not isinstance(item.get('name'),str):raise ValueError('Invalid Hub entry')
         status=str(item.get('status',''))
         flags={s.strip() for s in status.split(',')}
+        installed='enabled' in flags
         result.append({'name':item['name'][:256],'description':str(item.get('description',''))[:2048],
                        'version':str(item.get('local_version',''))[:128], 'status':status[:256],
-                       'available':'local' not in flags, 'installed':'enabled' in flags,
-                       'update_available':'update-available' in flags,
+                       'available':'local' not in flags, 'installed':installed,
+                       'update_available':installed and 'update-available' in flags,
                        'tainted':'tainted' in flags, 'loaded':None,
                        'editable':kind=='appsec-rules' and supported_rule(item['name']) and 'local' not in flags and 'tainted' not in flags})
     return result

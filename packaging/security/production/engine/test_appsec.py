@@ -7,6 +7,18 @@ class AppSecTest(unittest.TestCase):
   with patch.object(control,'invoke',return_value=json.dumps(data)):
    rows=appsec.rows(control,'appsec-rules')
   self.assertFalse(rows[0]['installed']);self.assertTrue(rows[1]['installed']);self.assertIsNone(rows[1]['loaded'])
+ def test_update_available_requires_installed_hub_entry(self):
+  cases=[('disabled,update-available',False,False),('enabled,update-available',True,True),('enabled',True,False),('disabled',False,False),('disabled, update-available',False,False)]
+  for kind in ('appsec-configs','appsec-rules','collections'):
+   for status,installed,update in cases:
+    with self.subTest(kind=kind,status=status):
+     # Upstream can advertise an update even for a disabled catalog entry.
+     data={kind:[{'name':'crowdsecurity/example','status':status,'local_version':'1.0'}]}
+     with patch.object(control,'invoke',return_value=json.dumps(data)):
+      row=appsec.rows(control,kind)[0]
+     self.assertEqual(row['installed'],installed)
+     self.assertEqual(row['update_available'],update)
+     self.assertEqual(row['status'],status)
  def test_enable_disable_and_rollback(self):
   for failure in [False,True]:
    with self.subTest(failure=failure),tempfile.TemporaryDirectory() as tmp:
