@@ -8,7 +8,8 @@ const props = defineProps<{ sites: SecuritySite[] }>()
 const emit = defineEmits<{ exclude: [event: SecurityEvent], block: [event: SecurityEvent], ban: [event: SecurityEvent] }>()
 const settings = useSettingsStore()
 const { modal, message } = App.useApp()
-const source = ref('modsecurity')
+const source = ref('all')
+const requestID = ref('')
 const vhost = ref('')
 const since = ref('1h')
 const node = ref('')
@@ -71,6 +72,7 @@ async function load() {
   try {
     const response = await security.events({
       source: source.value,
+      request_id: requestID.value.trim() || undefined,
       vhost: vhost.value || undefined,
       node: node.value.trim() || undefined,
       since: since.value,
@@ -108,7 +110,10 @@ watch([source, vhost, since], load, { immediate: true })
     <AForm layout="vertical">
       <div class="filters">
         <AFormItem :label="$gettext('Source')" :help="$gettext('ModSecurity zeigt Regeltreffer an einzelnen Anfragen; CrowdSec zeigt die erfassten CrowdSec-Ereignisse. Ein Treffer ist nicht automatisch eine Blockierung.')">
-          <ASelect v-model:value="source" :options="[{ value: 'modsecurity', label: 'ModSecurity / OWASP CRS' }, { value: 'crowdsec', label: 'CrowdSec' }]" />
+          <ASelect v-model:value="source" :options="[{ value: 'all', label: $gettext('Alle Sicherheitsquellen') }, { value: 'modsecurity', label: 'ModSecurity / OWASP CRS' }, { value: 'crowdsec', label: 'CrowdSec' }]" />
+        </AFormItem>
+        <AFormItem :label="$gettext('Referenz-ID')" :help="$gettext('Referenz von der Fehlerseite oder aus dem X-Request-ID-Header eingeben und aktualisieren. Gesucht wird im gesamten gewählten Zeitraum, nicht nur in den angezeigten Zeilen. Ältere Ereignisse und zusammengefasste IP-Sperren können ohne Referenz-ID vorliegen.')">
+          <AInput v-model:value="requestID" :maxlength="128" :placeholder="$gettext('Vollständige Referenz-ID')" allow-clear @press-enter="load" />
         </AFormItem>
         <AFormItem :label="$gettext('Website')" :help="$gettext('Grenzt die Anzeige auf einen VHost ein. Ändert keine Schutzrichtlinien und macht eine IP-Sperre nicht websitebezogen.')">
           <ASelect v-model:value="vhost" :options="siteOptions" show-search option-filter-prop="label" />
@@ -155,6 +160,12 @@ watch([source, vhost, since], load, { immediate: true })
         <div class="request">
           <code>{{ event.method || '—' }} {{ event.path || '—' }}</code>
         </div>
+        <p v-if="event.transaction_id" class="reference">
+          <strong>{{ $gettext('Referenz-ID') }}:</strong>
+          <ATypographyText :copyable="{ text: event.transaction_id }" code>
+            {{ event.transaction_id }}
+          </ATypographyText>
+        </p>
         <details>
           <summary>{{ $gettext('Request details') }}</summary>
           <dl><dt>{{ $gettext('Parameter') }}</dt><dd>{{ event.parameter || '—' }}</dd><dt>{{ $gettext('Request / transaction ID') }}</dt><dd>{{ event.transaction_id || '—' }}</dd><dt>{{ $gettext('Event ID') }}</dt><dd>{{ event.event_id }}</dd></dl>
@@ -186,6 +197,7 @@ watch([source, vhost, since], load, { immediate: true })
 .event { padding: 18px; border: 1px solid var(--ant-color-border-secondary); border-radius: 8px; margin-bottom: 12px; }
 .event-head, .request { display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+.reference { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .event-message, code, dd { overflow-wrap: anywhere; }
 .source-ip { white-space: normal; max-width: 100%; }
 details { margin-top: 12px; } summary { cursor: pointer; color: var(--ant-color-text-secondary); }

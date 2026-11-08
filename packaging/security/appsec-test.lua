@@ -27,7 +27,7 @@ local fake = {
     req={get_method=function()return 'POST'end,read_body=function()end,get_body_data=function()return body end,
          get_body_file=function()return body_path end,
          get_headers=function() return {['x-crowdsec-appsec-ip']='spoof', ['x-crowdsec-appsec-api-key']='forged',
-             ['x-crowdsec-appsec-host']='forged.example',['transfer-encoding']='chunked',['content-length']='999'} end},
+             ['x-request-id']='client-forged', ['X-Request-ID']='client-mixed-case', ['x-crowdsec-appsec-host']='forged.example',['transfer-encoding']='chunked',['content-length']='999'} end},
     utctime=function()return '2026-11-04 01:00:00'end,
     log=function(_, marker, value) emitted[#emitted+1]={marker,value} end,
     WARN=4,ERR=3,HTTP_FORBIDDEN=403,
@@ -46,6 +46,8 @@ status=403;run('detection');assert(#exits==0 and emitted[#emitted][2]:find('dete
 assert(captures.request.headers['x-crowdsec-appsec-ip']=='192.0.2.7')
 assert(captures.request.headers['x-crowdsec-appsec-api-key']=='test-only-key')
 assert(captures.request.headers['x-crowdsec-appsec-host']=='site.example')
+assert(captures.request.headers['x-request-id']=='rid', 'AppSec must receive server-generated request ID')
+assert(captures.request.headers['X-Request-ID']==nil)
 assert(not emitted[#emitted][2]:find('secret',1,true))
 run('block');assert(captures.target.port==7422 and exits[#exits]==403)
 fake.var.nginx_ui_crowdsec_allowlist='192.0.2.0/24';local n=#emitted;run('block');assert(#emitted==n and #exits==1)

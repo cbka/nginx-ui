@@ -5,7 +5,7 @@ package.loaded['resty.http'] = {new=function() return {
         if done then return nil end;done=true;return '{"action":"ban"}'
     end} end,
 } end}
-require('nginx_ui_appsec').check('detection', ngx.var.remote_addr)
+require('nginx_ui_appsec').check(ngx.var.uri == '/blocked' and 'block' or 'detection', ngx.var.remote_addr)
 for _, action in ipairs({'ban','captcha','challenge'}) do
     package.loaded['plugins.crowdsec.'..action]={apply=function()end}
 end

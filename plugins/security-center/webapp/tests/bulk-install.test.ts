@@ -1,8 +1,8 @@
 import type { SecurityBulkJob } from '../src/api/security_center'
-import { Transpiler } from 'bun'
-import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
+import { Transpiler } from 'bun'
+import { expect, test } from 'bun:test'
 import { bulkProgress, isBulkRunning } from '../src/views/bulkInstall'
 
 const pendingJob: SecurityBulkJob = {

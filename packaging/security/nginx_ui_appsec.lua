@@ -100,6 +100,9 @@ function M.check(mode, ip)
         end
         if length > MAX_BODY then return "body_limit" end
         local target = config[mode]
+        -- Keep the same server-owned reference as local security/access logs.
+        -- Never forward a client-supplied X-Request-ID as the authoritative ID.
+        outgoing["x-request-id"] = variable("request_id") or ""
         outgoing["host"] = target.host .. ":" .. target.port
         outgoing["x-crowdsec-appsec-api-key"] = config.key
         outgoing["x-crowdsec-appsec-ip"] = ip

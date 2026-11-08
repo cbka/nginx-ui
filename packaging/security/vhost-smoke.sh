@@ -40,6 +40,8 @@ error_log $work/error.log notice;
 events {}
 http {
  include /usr/local/share/nginx-ui-security/crowdsec-init.conf;
+ include /usr/local/share/nginx-ui-security/request-correlation.conf;
+ access_log $work/access.jsonl nginx_ui_request_json;
  server { listen 127.0.0.1:18081;
   location /v1/decisions { content_by_lua_block {
    local file=io.open('$work/ban','r');
@@ -101,7 +103,7 @@ test "$(code override.test "$attack")" = 403
 # Same source IP and same central decision: enforcement is a per-server choice.
 touch "$work/ban"
 sleep 2
-test "$(code default.test '')" = 403
+test "$(curl -s -D "$work/ban-headers" -o "$work/ban-body" -w '%{http_code}' -H 'Host: default.test' -H 'X-Request-ID: forged-client-reference' http://127.0.0.1:18080/)" = 403
 test "$(code override.test '')" = 200
 test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18082/)" = 403
 rm "$work/ban"
@@ -142,6 +144,13 @@ assert sorted(event['vhost'] for event in crowd)==['', 'default.test'], crowd
 crowd = [event for event in crowd if event['vhost']=='default.test']
 assert crowd[0]['action']=='ban' and crowd[0]['node']=='smoke-node', crowd
 assert crowd[0]['transaction_id'] and crowd[0]['event_time'].endswith('Z'), crowd
+headers = [line.split(':', 1)[1].strip() for line in (root/'ban-headers').read_text().splitlines() if line.lower().startswith('x-request-id:')]
+assert headers == [crowd[0]['transaction_id']], (headers, crowd)
+assert 'Referenz-ID: <code>' + headers[0] + '</code>' in (root/'ban-body').read_text()
+assert 'forged-client-reference' not in headers
+access = [json.loads(line) for line in (root/'access.jsonl').read_text().splitlines()]
+assert any(row['request_id']==headers[0] and row['status']==403 and row['host']=='default.test' for row in access)
+print('PASS: real CrowdSec bouncer403 has same server ID in response header, HTML reference, access log and normalized security event')
 assert all(event['event_time'].endswith('Z') for event in events), events
 assert all('?' not in event['path'] for event in events), events
 reader = Reader(root, root/'policies', root/'events.jsonl', root/'cursors', 'smoke-node', root/'error.log')

@@ -141,3 +141,51 @@ func TestEventsPreserveCollectorSourceIP(t *testing.T) {
 		}
 	}
 }
+
+func TestEventsRequestReferenceFilterBeforeLimit(t *testing.T) {
+	const id = "0123456789abcdef0123456789abcdef"
+	handler := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		if !strings.Contains(query, `transaction_id="`+id+`"`) || r.URL.Query().Get("limit") != "10" {
+			t.Errorf("exact reference must be queried in Loki before limiting: %s", r.URL.RawQuery)
+		}
+		if !strings.Contains(query, `node="kub1"`) || !strings.Contains(query, `source=~"modsecurity|crowdsec"`) {
+			t.Errorf("source/node filters missing: %s", query)
+		}
+		rows := [][]string{}
+		for _, source := range []string{"modsecurity", "crowdsec", "untrusted"} {
+			line, _ := json.Marshal(SecurityEvent{Source: source, TransactionID: id})
+			rows = append(rows, []string{"1730000000000000000", string(line)})
+		}
+		other, _ := json.Marshal(SecurityEvent{Source: "crowdsec", TransactionID: "different"})
+		rows = append(rows, []string{"1730000000000000000", string(other)})
+		json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{"resultType": "streams", "result": []any{map[string]any{"stream": map[string]string{"node": "kub1"}, "values": rows}}}})
+	}))
+	defer handler.Close()
+	t.Setenv("SECURITY_CENTER_LOKI_URL", handler.URL)
+	s := New(Config{Enabled: true})
+	got, err := s.EventsForRequest(context.Background(), "all", "", "1h", 10, "kub1", id)
+	if err != nil || len(got.Items) != 2 {
+		t.Fatalf("matching events across both sources only: %+v %v", got, err)
+	}
+	for _, item := range got.Items {
+		if item.TransactionID != id {
+			t.Fatal("wrong reference returned")
+		}
+	}
+}
+
+func TestEventsRejectInvalidRequestReference(t *testing.T) {
+	s := New(Config{Enabled: true})
+	for _, id := range []string{"x\ny", `x" | json`, strings.Repeat("a", 129), "<script>", "white space"} {
+		if _, err := s.EventsForRequest(context.Background(), "all", "", "1h", 10, "", id); err != ErrInvalid {
+			t.Errorf("invalid reference %q accepted: %v", id, err)
+		}
+	}
+	// Legacy transaction IDs may contain punctuation, but never query syntax.
+	for _, id := range []string{"", "legacy-id_1.2:3", strings.Repeat("a", 32)} {
+		if _, err := requestReferenceQuery(id); err != nil {
+			t.Errorf("valid reference rejected: %q", id)
+		}
+	}
+}

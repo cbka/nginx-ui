@@ -183,7 +183,7 @@ export default {
   templates: (): Promise<{ items: SecurityTemplate[] }> => http.get(`${base}/templates`, options),
   saveTemplate: (id: string, payload: Pick<SecurityTemplate, 'name' | 'description' | 'policy'>): Promise<SecurityMutation> => http.put(`${base}/templates/${encodeURIComponent(id)}`, payload, options),
   deleteTemplate: (id: string): Promise<SecurityMutation> => http.delete(`${base}/templates/${encodeURIComponent(id)}`, options),
-  events: (params: { source: string, vhost?: string, node?: string, since: string, limit: number }): Promise<SecurityEvents> => http.get(`${base}/events`, { ...options, params }),
+  events: (params: { source: string, vhost?: string, node?: string, request_id?: string, since: string, limit: number }): Promise<SecurityEvents> => http.get(`${base}/events`, { ...options, params }),
   rules: (): Promise<{ items: { id: number, message: string, file: string }[], truncated: boolean }> => http.get(`${base}/modsecurity/rules`, options),
   sites: (): Promise<{ items: SecuritySite[] }> => http.get(`${base}/sites`, options),
   site: (name: string): Promise<SiteSecurityState> => http.get(`${base}/sites/${encodeURIComponent(name)}`, options),

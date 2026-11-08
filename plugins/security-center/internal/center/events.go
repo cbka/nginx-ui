@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,23 +43,51 @@ type EventPage struct {
 }
 
 func eventQuery(source, vhost string) (string, error) {
-	if source != "modsecurity" && source != "crowdsec" {
+	if source != "modsecurity" && source != "crowdsec" && source != "all" {
 		return "", ErrInvalid
 	}
 	if len(vhost) > 253 || strings.ContainsAny(vhost, "\r\n\x00") {
 		return "", ErrInvalid
 	}
 	q := `{job="nginx-security"} | json | source=` + strconv.Quote(source)
+	if source == "all" {
+		q = `{job="nginx-security"} | json | source=~"modsecurity|crowdsec"`
+	}
 	if vhost != "" {
 		q += ` | vhost=` + strconv.Quote(vhost)
 	}
 	return q, nil
 }
 
+var requestReferencePattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+
+func requestReferenceQuery(reference string) (string, error) {
+	if reference == "" {
+		return "", nil
+	}
+	if !requestReferencePattern.MatchString(reference) {
+		return "", ErrInvalid
+	}
+	return ` | transaction_id=` + strconv.Quote(reference), nil
+}
+
 // Events only queries a server-configured Loki instance and returns a normalized,
 // bounded projection. Raw audit bodies, headers, query strings and credentials
 // must never be included by the collector or returned through this endpoint.
 func (s *Service) Events(ctx context.Context, source, vhost, since string, limit int, nodes ...string) (EventPage, error) {
+	if len(nodes) > 1 {
+		return EventPage{}, ErrInvalid
+	}
+	node := ""
+	if len(nodes) == 1 {
+		node = nodes[0]
+	}
+	return s.EventsForRequest(ctx, source, vhost, since, limit, node, "")
+}
+
+// EventsForRequest applies an exact reference filter in Loki before its limit.
+// A reference is correlation data only; it never grants access to an event.
+func (s *Service) EventsForRequest(ctx context.Context, source, vhost, since string, limit int, node, reference string) (EventPage, error) {
 	result := EventPage{Items: []SecurityEvent{}, Limited: true, Limit: limit, Since: since}
 	if !s.Config.Enabled {
 		return result, ErrDisabled
@@ -74,11 +103,12 @@ func (s *Service) Events(ctx context.Context, source, vhost, since string, limit
 	if err != nil {
 		return result, err
 	}
-	if len(nodes) > 1 {
-		return result, ErrInvalid
+	referenceFilter, err := requestReferenceQuery(reference)
+	if err != nil {
+		return result, err
 	}
-	if len(nodes) == 1 && nodes[0] != "" {
-		node := nodes[0]
+	query += referenceFilter
+	if node != "" {
 		if len(node) > 253 || strings.ContainsAny(node, "\r\n\x00") {
 			return result, ErrInvalid
 		}
@@ -135,9 +165,13 @@ func (s *Service) Events(ctx context.Context, source, vhost, since string, limit
 	if err != nil || len(b) > 2<<20 {
 		return result, errors.New("central security log response exceeds limit")
 	}
-	return decodeEvents(b, source, vhost, result)
+	return decodeEventsFiltered(b, source, vhost, reference, result)
 }
 func decodeEvents(b []byte, source, vhost string, result EventPage) (EventPage, error) {
+	return decodeEventsFiltered(b, source, vhost, "", result)
+}
+
+func decodeEventsFiltered(b []byte, source, vhost, reference string, result EventPage) (EventPage, error) {
 	var envelope struct {
 		Status string `json:"status"`
 		Data   struct {
@@ -161,7 +195,7 @@ func decodeEvents(b []byte, source, vhost string, result EventPage) (EventPage, 
 				continue
 			}
 			var event SecurityEvent
-			if json.Unmarshal([]byte(row[1]), &event) != nil || event.Source != source || (vhost != "" && event.VHost != vhost) {
+			if json.Unmarshal([]byte(row[1]), &event) != nil || (event.Source != "modsecurity" && event.Source != "crowdsec") || (source != "all" && event.Source != source) || (vhost != "" && event.VHost != vhost) || (reference != "" && event.TransactionID != reference) {
 				continue
 			}
 			event.Timestamp = time.Unix(0, n).UTC().Format(time.RFC3339Nano)

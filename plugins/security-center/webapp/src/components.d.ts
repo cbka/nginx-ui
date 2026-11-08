@@ -36,6 +36,7 @@ declare module 'vue' {
     ATabs: typeof import('antdv-next')['Tabs']
     ATag: typeof import('antdv-next')['Tag']
     ATextarea: typeof import('antdv-next')['TextArea']
+    ATypographyText: typeof import('antdv-next')['TypographyText']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }
@@ -67,6 +68,7 @@ declare global {
   const ATabs: typeof import('antdv-next')['Tabs']
   const ATag: typeof import('antdv-next')['Tag']
   const ATextarea: typeof import('antdv-next')['TextArea']
+  const ATypographyText: typeof import('antdv-next')['TypographyText']
   const RouterLink: typeof import('vue-router')['RouterLink']
   const RouterView: typeof import('vue-router')['RouterView']
 }

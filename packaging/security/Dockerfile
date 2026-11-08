@@ -37,12 +37,12 @@ RUN mkdir -p /tmp/security \
     && cp /tmp/security/lua-resty-string-0.16/lib/resty/*.lua /usr/local/lua/crowdsec/resty/ \
     && rm -rf /tmp/security
 COPY packaging/security/audit_reader.py packaging/security/audit_normalizer.py /usr/local/lib/nginx-ui-security/
-COPY packaging/security/security-access.lua packaging/security/nginx_ui_appsec.lua packaging/security/nginx_ui_ip_allowlist.lua packaging/security/nginx_ui_security_events.lua /usr/local/lua/nginx-ui/
+COPY packaging/security/security-access.lua packaging/security/nginx_ui_appsec.lua packaging/security/nginx_ui_request_reference.lua packaging/security/request-reference-header.lua packaging/security/request-reference-body.lua packaging/security/nginx_ui_ip_allowlist.lua packaging/security/nginx_ui_security_events.lua /usr/local/lua/nginx-ui/
 COPY packaging/security/crowdsec-init.conf /usr/local/share/nginx-ui-security/crowdsec-init.conf
 COPY packaging/security/artifacts/nginx-ui /usr/local/bin/nginx-ui
 COPY packaging/security/entrypoint.sh packaging/security/restart.sh packaging/security/smoke.sh /usr/local/sbin/
 COPY packaging/security/supervisord.conf /etc/supervisor/security-runtime.conf
-COPY packaging/security/modsecurity-base.conf packaging/security/loader.conf packaging/security/initial-policy.conf /usr/local/share/nginx-ui-security/
+COPY packaging/security/modsecurity-base.conf packaging/security/loader.conf packaging/security/initial-policy.conf packaging/security/request-correlation.conf /usr/local/share/nginx-ui-security/
 RUN chmod 0755 /usr/local/bin/nginx-ui /usr/local/sbin/entrypoint.sh /usr/local/sbin/restart.sh /usr/local/sbin/smoke.sh \
     && mkdir -p /run/nginx-ui /etc/nginx/security-center /usr/local/etc/nginx-ui /etc/modsecurity /var/log/nginx/modsecurity \
     && chmod 0750 /var/log/nginx/modsecurity \

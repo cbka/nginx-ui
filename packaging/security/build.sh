@@ -11,7 +11,7 @@ context=$(mktemp -d)
 trap 'rm -rf "$context"' EXIT HUP INT TERM
 # Explicit allowlist: never copy local-cluster state, credentials, logs or test data.
 mkdir -p "$context/packaging/security/artifacts"
-for file in Dockerfile audit_reader.py audit_normalizer.py security-access.lua nginx_ui_appsec.lua nginx_ui_ip_allowlist.lua nginx_ui_security_events.lua crowdsec-init.conf entrypoint.sh restart.sh smoke.sh supervisord.conf modsecurity-base.conf loader.conf initial-policy.conf; do
+for file in Dockerfile audit_reader.py audit_normalizer.py security-access.lua nginx_ui_appsec.lua nginx_ui_request_reference.lua request-reference-header.lua request-reference-body.lua request-correlation.conf nginx_ui_ip_allowlist.lua nginx_ui_security_events.lua crowdsec-init.conf entrypoint.sh restart.sh smoke.sh supervisord.conf modsecurity-base.conf loader.conf initial-policy.conf; do
     cp "$root/packaging/security/$file" "$context/packaging/security/$file"
 done
 cp "$root/packaging/security/artifacts/nginx-ui" "$context/packaging/security/artifacts/nginx-ui"
