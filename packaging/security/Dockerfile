@@ -36,6 +36,7 @@ RUN mkdir -p /tmp/security \
     && tar -xzf /tmp/security/string.tgz -C /tmp/security \
     && cp /tmp/security/lua-resty-string-0.16/lib/resty/*.lua /usr/local/lua/crowdsec/resty/ \
     && rm -rf /tmp/security
+COPY packaging/security/ban.html /var/lib/crowdsec/lua/templates/ban.html
 COPY packaging/security/audit_reader.py packaging/security/audit_normalizer.py /usr/local/lib/nginx-ui-security/
 COPY packaging/security/security-access.lua packaging/security/nginx_ui_appsec.lua packaging/security/nginx_ui_request_reference.lua packaging/security/request-reference-header.lua packaging/security/request-reference-body.lua packaging/security/nginx_ui_ip_allowlist.lua packaging/security/nginx_ui_security_events.lua /usr/local/lua/nginx-ui/
 COPY packaging/security/crowdsec-init.conf /usr/local/share/nginx-ui-security/crowdsec-init.conf

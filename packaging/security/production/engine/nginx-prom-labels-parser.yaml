@@ -1,0 +1,34 @@
+# Keep URI last in new logs; accept old logs and the transitional ID suffix.
+name: local/nginx-prom-labels
+filter: "evt.Line.Labels.type == 'nginx-prom-labels'"
+onsuccess: next_stage
+description: Parse NGINX prom_labels without polluting paths with request references
+pattern_syntax:
+  REQUESTID: '[a-f0-9]{32}'
+nodes:
+  - grok:
+      pattern: '^%{IPORHOST:remote_addr} - %{NOTSPACE:remote_user} \[%{HTTPDATE:time_local}\] vhost=%{NOTSPACE:target_fqdn} server=%{NOTSPACE:server_name} method=%{WORD:verb} status=%{INT:status} rt=%{NOTSPACE:request_time} urt=%{NOTSPACE:upstream_time} bytes=%{INT:bytes} request_id=%{REQUESTID:request_id} uri=%{GREEDYDATA:request}$'
+      apply_on: message
+  - grok:
+      pattern: '^%{IPORHOST:remote_addr} - %{NOTSPACE:remote_user} \[%{HTTPDATE:time_local}\] vhost=%{NOTSPACE:target_fqdn} server=%{NOTSPACE:server_name} method=%{WORD:verb} status=%{INT:status} rt=%{NOTSPACE:request_time} urt=%{NOTSPACE:upstream_time} bytes=%{INT:bytes} uri=%{DATA:request} request_id=%{REQUESTID:request_id}$'
+      apply_on: message
+  - grok:
+      pattern: '^%{IPORHOST:remote_addr} - %{NOTSPACE:remote_user} \[%{HTTPDATE:time_local}\] vhost=%{NOTSPACE:target_fqdn} server=%{NOTSPACE:server_name} method=%{WORD:verb} status=%{INT:status} rt=%{NOTSPACE:request_time} urt=%{NOTSPACE:upstream_time} bytes=%{INT:bytes} uri=%{GREEDYDATA:request}$'
+      apply_on: message
+statics:
+  - meta: service
+    value: http
+  - meta: log_type
+    value: http_access-log
+  - meta: source_ip
+    expression: evt.Parsed.remote_addr
+  - meta: http_status
+    expression: evt.Parsed.status
+  - meta: http_path
+    expression: evt.Parsed.request
+  - meta: http_verb
+    expression: evt.Parsed.verb
+  - meta: target_fqdn
+    expression: evt.Parsed.target_fqdn
+  - target: evt.StrTime
+    expression: evt.Parsed.time_local

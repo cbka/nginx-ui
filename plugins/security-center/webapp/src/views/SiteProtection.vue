@@ -36,6 +36,7 @@ const syncing = ref(false)
 const syncResult = ref<SiteSyncResult>()
 const error = ref('')
 const resultText = ref('')
+const resultType = ref<'info' | 'success' | 'warning'>('info')
 const templateNotice = ref('')
 let generation = 0
 let mounted = true
@@ -63,6 +64,7 @@ watch([loading, saving, syncing], ([isLoading, isSaving, isSyncing]) => emit('bu
 
 function restoreForm() {
   resultText.value = ''
+  resultType.value = 'info'
   templateNotice.value = ''
   if (!state.value)
     return
@@ -125,6 +127,7 @@ async function load() {
 }
 
 function templateDraft(next: SiteSecurityPolicy) {
+  resultType.value = 'info'
   policy.value = { ...next, appsec: next.appsec ?? 'inherit' }
   exclusions.value = next.excluded_rule_ids.join(', ')
   blockedPaths.value = next.blocked_paths.join('\n')
@@ -137,6 +140,7 @@ function inheritDefaults() {
   if (state.value?.replica || syncing.value)
     return
   templateNotice.value = ''
+  resultType.value = 'info'
   policy.value = inheritedSitePolicy()
   exclusions.value = ''
   blockedPaths.value = ''
@@ -146,9 +150,10 @@ function inheritDefaults() {
 }
 
 function apply() {
-  if (!payload.value || !valid.value || state.value?.replica || syncing.value)
+  if (!payload.value || !valid.value || state.value?.replica || saving.value || loading.value || syncing.value || !canManageSecurity(settings.node.id))
     return
   const name = props.name
+  const openedGeneration = generation
   const change = {
     ...payload.value,
     excluded_rule_ids: [...payload.value.excluded_rule_ids],
@@ -159,25 +164,49 @@ function apply() {
   }
   modal.confirm({
     title: $gettext('Apply protection to %{name}?', { name }),
-    content: $gettext('This changes every server block in this website configuration. Nginx will validate and reload. AppSec observes without blocking in detection mode and can reject requests in block mode. Disabling inspection or CrowdSec enforcement reduces protection; exclusions are added to global exclusions. Exact path block rules deny matching requests with HTTP 403 when WAF blocking is active. IP allowlists bypass the respective protection and are added to global allowlists.'),
+    content: $gettext('This saves locally and automatically synchronizes this website’s configured peers. Each node validates and reloads independently; failed peers retain their prior configuration. This changes every server block in this website configuration. Nginx will validate and reload. AppSec observes without blocking in detection mode and can reject requests in block mode. Disabling inspection or CrowdSec enforcement reduces protection; exclusions are added to global exclusions. Exact path block rules deny matching requests with HTTP 403 when WAF blocking is active. IP allowlists bypass the respective protection and are added to global allowlists.'),
     okText: $gettext('Validate and apply'),
     okButtonProps: { danger: change.modsecurity !== 'On' || change.crowdsec === 'off' || change.excluded_rule_ids.length > 0 || change.exceptions.length > 0 || change.blocked_paths.length > 0 || change.modsecurity_allowlist.length > 0 || change.crowdsec_allowlist.length > 0 },
     async onOk() {
-      if (!mounted || props.name !== name || !canManageSecurity(settings.node.id))
+      if (!mounted || props.name !== name || generation !== openedGeneration || !canManageSecurity(settings.node.id) || state.value?.replica || saving.value || syncing.value)
         throw new Error($gettext('The website or controller changed. Reopen the policy before applying it.'))
+      let operationGeneration = generation
       saving.value = true
       error.value = ''
       resultText.value = ''
+      resultType.value = 'info'
+      syncResult.value = undefined
+      let locallyApplied = false
       try {
         const result = await security.saveSite(name, change)
+        locallyApplied = result.applied === true
+        if (!mounted || props.name !== name || generation !== operationGeneration || !canManageSecurity(settings.node.id))
+          return
+        operationGeneration++
         await load()
-        resultText.value = result.applied === true
-          ? $gettext('Website configuration validated; Nginx reload requested locally. Synchronize the saved policy to update configured peers, then verify protection with actual traffic.')
-          : $gettext('Policy saved; runtime application has not been confirmed.')
+        if (!mounted || props.name !== name || generation !== operationGeneration || !canManageSecurity(settings.node.id))
+          return
+        if (!locallyApplied) {
+          resultType.value = 'warning'
+          resultText.value = $gettext('Policy saved; local runtime application has not been confirmed. Peers were not synchronized.')
+          return
+        }
+        if (!syncAllowed.value || loading.value || error.value)
+          throw new Error($gettext('The saved policy could not be reloaded for synchronization. Reload this website and retry synchronization.'))
+        await syncSaved(name)
       }
       catch (e) {
-        error.value = getErrorMessage(e)
-        throw e
+        if (mounted && props.name === name && generation === operationGeneration && canManageSecurity(settings.node.id)) {
+          error.value = locallyApplied
+            ? $gettext('Saved locally, but synchronization is not confirmed. Use Retry synchronization without saving again. Details: %{error}', {
+                error: getErrorMessage(e),
+              })
+            : getErrorMessage(e)
+        }
+        // A locally applied change must not leave a confirmation dialog whose
+        // retry would save a new revision. Keep the independent sync retry visible.
+        if (!locallyApplied)
+          throw e
       }
       finally {
         saving.value = false
@@ -185,8 +214,49 @@ function apply() {
     },
   })
 }
+async function syncSaved(name: string) {
+  syncing.value = true
+  error.value = ''
+  syncResult.value = undefined
+  resultText.value = $gettext('Saved locally. Synchronizing configured peers…')
+  resultType.value = 'info'
+  const revision = state.value?.revision
+  const syncGeneration = generation
+  try {
+    const result = await security.syncSite(name)
+    if (!mounted || props.name !== name || generation !== syncGeneration || !canManageSecurity(settings.node.id))
+      return
+    syncResult.value = result
+    const confirmed = result.revision === revision && result.results.every(item =>
+      (item.status === 'applied' || item.status === 'unchanged') && item.revision === revision,
+    )
+    if (!confirmed) {
+      resultType.value = 'warning'
+      resultText.value = $gettext('Saved locally, but not all configured peers confirmed this revision. Review the node results and retry synchronization.')
+    }
+    else if (!result.results.length) {
+      resultType.value = 'info'
+      resultText.value = $gettext('Saved locally. No peer confirmations were returned; cluster-wide application has not been confirmed.')
+    }
+    else {
+      resultType.value = 'success'
+      resultText.value = $gettext('Saved and synchronized: all configured peers confirmed this revision. Verify protection with actual traffic.')
+    }
+  }
+  catch (e) {
+    if (mounted && props.name === name && generation === syncGeneration && canManageSecurity(settings.node.id)) {
+      resultType.value = 'warning'
+      resultText.value = ''
+    }
+    throw e
+  }
+  finally {
+    syncing.value = false
+  }
+}
+
 function synchronize() {
-  if (!syncAllowed.value || syncing.value)
+  if (!syncAllowed.value || syncing.value || saving.value || loading.value || !canManageSecurity(settings.node.id))
     return
   const name = props.name
   modal.confirm({
@@ -196,18 +266,13 @@ function synchronize() {
     async onOk() {
       if (!mounted || props.name !== name || !canManageSecurity(settings.node.id))
         throw new Error($gettext('The website or controller changed. Reopen the policy before synchronizing.'))
-      syncing.value = true
-      error.value = ''
-      syncResult.value = undefined
       try {
-        syncResult.value = await security.syncSite(name)
+        await syncSaved(name)
       }
       catch (e) {
-        error.value = getErrorMessage(e)
+        if (mounted && props.name === name && canManageSecurity(settings.node.id))
+          error.value = getErrorMessage(e)
         throw e
-      }
-      finally {
-        syncing.value = false
       }
     },
   })
@@ -215,6 +280,8 @@ function synchronize() {
 
 watch(() => props.name, () => {
   resultText.value = ''
+  resultType.value = 'info'
+  syncResult.value = undefined
   void load()
 }, { immediate: true })
 </script>
@@ -222,7 +289,7 @@ watch(() => props.name, () => {
 <template>
   <ASpin :spinning="loading">
     <AAlert v-if="error" type="error" show-icon :message="error" class="section-gap" />
-    <AAlert v-if="resultText" type="info" show-icon :message="resultText" class="section-gap" />
+    <AAlert v-if="resultText" :type="resultType" show-icon :message="resultText" class="section-gap" />
     <template v-if="state && policy">
       <AAlert v-if="state.replica" type="info" show-icon :message="$gettext('Read-only replica. Edit and synchronize this policy from its owner: %{owner}', { owner: state.owner })" class="section-gap" />
       <AAlert type="info" show-icon :message="$gettext('One policy applies to every server block and server name in this website file. Inherited settings follow future global changes; explicit values override them.')" class="section-gap" />
@@ -252,9 +319,9 @@ watch(() => props.name, () => {
         <summary>{{ $gettext('Welche Einstellungen passen zu meiner Website?') }}</summary>
         <p>{{ $gettext('Zum Einstieg: zunächst nur beobachten (Detection only), mit Paranoia-Level 1. Normale Abläufe wie Anmeldung, Suche und Upload testen und die Ereignisse prüfen. Erst danach gezielt auf Blockieren umstellen.') }}</p>
         <p>{{ $gettext('Vererben übernimmt die globalen Einstellungen einschließlich späterer Änderungen. Ein eigener Wert gilt nur für diese Website. Die Anzeige „Effective saved policy“ zeigt den gespeicherten Stand, nicht den ungespeicherten Entwurf.') }}</p>
-        <p>{{ $gettext('Speichern wirkt zunächst auf diesem Knoten. Anschließend die gespeicherte Richtlinie synchronisieren und die Bestätigung jedes Zielknotens prüfen.') }}</p>
+        <p>{{ $gettext('„Validate and apply“ speichert lokal und synchronisiert anschließend automatisch alle konfigurierten Zielknoten. Prüfe die Ergebnisse je Knoten; bei Fehlern kannst du die Synchronisierung ohne erneutes Speichern wiederholen.') }}</p>
       </details>
-      <AForm layout="vertical" :disabled="state.replica || syncing" @submit="apply">
+      <AForm layout="vertical" :disabled="state.replica || syncing || saving || loading" @submit="apply">
         <div class="policy-grid">
           <AFormItem :label="$gettext('WAF mode for this website')" :help="$gettext('Die Web-Firewall prüft Anfragen auf Angriffsmuster. Detection only protokolliert ohne WAF-Sperre; On prüft und blockiert; Off schaltet diese Prüfung aus. CrowdSec kann auch bei Detection only weiterhin sperren.')">
             <ASelect v-model:value="policy.modsecurity" :options="[{ value: 'inherit', label: $gettext('Inherit global setting') }, { value: 'DetectionOnly', label: $gettext('Detection only') }, { value: 'On', label: $gettext('On — inspect and block') }, { value: 'Off', label: $gettext('Off — no inspection') }]" />
@@ -262,7 +329,7 @@ watch(() => props.name, () => {
           <AFormItem :label="$gettext('CrowdSec enforcement for this website')" :help="$gettext('Wendet vorhandene CrowdSec-Entscheidungen auf Besucher dieser Website an. Aus deaktiviert hier die Durchsetzung, löscht aber keine zentralen Entscheidungen und ändert keine Community-Meldungen.')">
             <ASelect v-model:value="policy.crowdsec" :options="[{ value: 'inherit', label: $gettext('Inherit global setting') }, { value: 'on', label: $gettext('Enforce CrowdSec decisions') }, { value: 'off', label: $gettext('Do not enforce CrowdSec decisions') }]" />
           </AFormItem>
-          <AFormItem :label="$gettext('CrowdSec AppSec für diese Website')" :help="$gettext('Prüft einzelne HTTP-Anfragen direkt mit AppSec-Regeln, unabhängig von bestehenden IP-Sperren und ModSecurity. Beobachten meldet Treffer ohne AppSec-Blockierung; Blockieren kann Anfragen ablehnen. Vererben folgt dem globalen AppSec-Modus. Anschließend synchronisieren und echte Anfragen prüfen: die gespeicherte Auswahl allein bestätigt keine laufende Prüfung.')">
+          <AFormItem :label="$gettext('CrowdSec AppSec für diese Website')" :help="$gettext('Prüft einzelne HTTP-Anfragen direkt mit AppSec-Regeln, unabhängig von bestehenden IP-Sperren und ModSecurity. Beobachten meldet Treffer ohne AppSec-Blockierung; Blockieren kann Anfragen ablehnen. Vererben folgt dem globalen AppSec-Modus. Beim Anwenden wird automatisch synchronisiert. Danach echte Anfragen prüfen: die gespeicherte Auswahl allein bestätigt keine laufende Prüfung.')">
             <ASelect v-model:value="policy.appsec" :options="[{ value: 'inherit', label: $gettext('Globalen Wert übernehmen') }, { value: 'off', label: $gettext('Aus – keine AppSec-Prüfung') }, { value: 'detection', label: $gettext('Beobachten – ohne AppSec-Sperren') }, { value: 'block', label: $gettext('Blockieren – Treffer durchsetzen') }]" />
           </AFormItem>
           <AFormItem :label="$gettext('Prüfstrenge (Paranoia-Level)')" :help="$gettext('1 ist der empfohlene Einstieg. 2 bis 4 ergänzen strengere Regeln und können mehr legitime Anfragen fälschlich erkennen. „Globalen Wert übernehmen“ folgt den zentralen Einstellungen.')">
@@ -355,13 +422,13 @@ watch(() => props.name, () => {
       <section class="sync-section">
         <h3>{{ $gettext('Synchronize saved policy') }}</h3>
         <p class="muted">
-          {{ $gettext('Saving applies locally. This separate action distributes the saved website policy to its configured peers; results can differ per node.') }}
+          {{ $gettext('Validate and apply synchronizes automatically. Retry here to send the saved revision again without saving a new change. Results can differ per node.') }}
         </p>
         <p v-if="state.revision" class="muted">
           {{ $gettext('Saved revision') }}: <code>{{ state.revision }}</code>
         </p>
         <AButton :loading="syncing" :disabled="loading || saving || !syncAllowed" @click="synchronize">
-          {{ $gettext('Synchronize to configured peers') }}
+          {{ $gettext('Retry synchronization') }}
         </AButton>
         <AAlert v-if="syncResult" :type="syncResult.results.some(item => item.status === 'failed' || item.status === 'unsupported') ? 'warning' : 'info'" show-icon :message="syncResult.message" class="section-gap" />
         <p v-if="syncResult && !syncResult.results.length" class="muted">
@@ -369,7 +436,7 @@ watch(() => props.name, () => {
         </p>
         <div v-for="item in syncResult?.results ?? []" :key="item.node_id" class="peer-result">
           <strong>{{ item.node }}</strong>
-          <ATag :color="item.status === 'applied' ? 'green' : item.status === 'failed' ? 'red' : 'orange'">
+          <ATag :color="item.status === 'applied' || item.status === 'unchanged' ? 'green' : item.status === 'failed' ? 'red' : 'orange'">
             {{ item.status }}
           </ATag>
           <span>{{ item.message }}</span>

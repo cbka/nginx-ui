@@ -52,6 +52,16 @@ function M.body()
         return '<div role="note" class="nginx-ui-request-reference"><p>Referenz-ID: <code>' .. old_id .. '</code></p></div>'
     end)
     local block = '<div role="note" class="nginx-ui-request-reference"><p>Referenz-ID: <code>' .. state.id .. '</code></p></div>'
+    -- Owned block pages reserve an in-card slot, so the reference is visible
+    -- without scrolling below a full-height upstream layout.
+    local marker = "<!-- nginx-ui-request-reference -->"
+    local slot = chunk:find(marker, 1, true)
+    if slot then
+        chunk = chunk:sub(1, slot - 1) .. block .. chunk:sub(slot + #marker)
+        ngx.arg[1] = chunk
+        ngx.ctx.nginx_ui_request_reference = nil
+        return
+    end
     local before, closing = chunk:match("^(.*)(</[bB][oO][dD][yY]%s*>.*)$")
     if before then
         chunk = before .. block .. closing

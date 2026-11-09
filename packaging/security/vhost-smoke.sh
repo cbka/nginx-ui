@@ -147,6 +147,8 @@ assert crowd[0]['transaction_id'] and crowd[0]['event_time'].endswith('Z'), crow
 headers = [line.split(':', 1)[1].strip() for line in (root/'ban-headers').read_text().splitlines() if line.lower().startswith('x-request-id:')]
 assert headers == [crowd[0]['transaction_id']], (headers, crowd)
 assert 'Referenz-ID: <code>' + headers[0] + '</code>' in (root/'ban-body').read_text()
+assert '<!-- nginx-ui-request-reference -->' not in (root/'ban-body').read_text()
+assert (root/'ban-body').read_text().index('Referenz-ID: <code>') < (root/'ban-body').read_text().index('</main>')
 assert 'forged-client-reference' not in headers
 access = [json.loads(line) for line in (root/'access.jsonl').read_text().splitlines()]
 assert any(row['request_id']==headers[0] and row['status']==403 and row['host']=='default.test' for row in access)

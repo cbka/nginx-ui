@@ -192,3 +192,28 @@ hourly Hub updates retain installed entries and the current activation profile.
 Scenario mutations now return an explicit reload receipt to the plugin bridge,
 so a completed central transaction is not followed by a second engine restart.
 Native cscli integrations without that receipt retain their configured reload.
+
+## Access-log request references
+
+Use `nginx-prom-labels-parser.yaml` from this directory for the deployment's
+`nginx-security-engine-config` ConfigMap key of the same name. The producer must
+keep URI last: `... bytes=$body_bytes_sent request_id=$request_id uri=$request_uri`.
+Do not append arbitrary metadata after URI: the historical parser treated every
+suffix as part of `http_path`, which changes scenario distinct-path counting.
+
+The parser accepts the new prefix field, historical logs without IDs, and the
+transitional `uri=... request_id=<32 lowercase hex>` suffix emitted on 2026-11-08.
+Ordered alternatives stop at the first successful parse. The prefix format keeps
+all URI content intact, including a literal suffix resembling a request ID.
+The transitional format is intrinsically ambiguous if an old decoded URI ends in
+that exact literal sequence; raw HTTP URI spaces are not valid, but log-format
+changes alone cannot prove all historical input was canonical. Prefer the prefix
+format for all new output, and keep reference IDs out of path-based detection.
+
+Updating the image or seed ConfigMap does not replace an initialized persistent
+parser (`initialize.py` exits when its marker exists). Migrate the existing file
+at `/etc/crowdsec/parsers/s01-parse/nginx-prom-labels.yaml` with a backup, validate
+CrowdSec configuration, reload the engine, then change producers. Keep both seed
+and persistent file identical. Rollback producers before reverting this parser.
+Run `./test-prom-labels.sh <existing-engine-image>` for the actual CrowdSec parser
+and enrichment regression in an isolated, bounded, self-cleaning container.
