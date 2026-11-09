@@ -45,13 +45,23 @@ function M.body()
         -- Exact native footer only, never rewrite arbitrary upstream branding.
         chunk = chunk:gsub("<hr><center>nginx/?[%d%.]*</center>\r?\n?", "")
     end
-    -- A chained Nginx UI proxy may already have annotated this HTML. Replace
-    -- only our exact generated block; unrelated application markup is retained.
+    -- Keep an existing owned slot in place through chained proxies. Replacing
+    -- the ID rather than moving its block preserves the visible card layout.
+    local block = '<div role="note" class="nginx-ui-request-reference"><p>Referenz-ID: <code>' .. state.id .. '</code></p></div>'
+    local replaced = false
     chunk = chunk:gsub('<div role="note" class="nginx%-ui%-request%-reference"><p>Referenz%-ID: <code>([a-f0-9]+)</code></p></div>', function(old_id)
-        if #old_id == 32 then return "" end
+        if #old_id == 32 then
+            if replaced then return "" end
+            replaced = true
+            return block
+        end
         return '<div role="note" class="nginx-ui-request-reference"><p>Referenz-ID: <code>' .. old_id .. '</code></p></div>'
     end)
-    local block = '<div role="note" class="nginx-ui-request-reference"><p>Referenz-ID: <code>' .. state.id .. '</code></p></div>'
+    if replaced then
+        ngx.arg[1] = chunk
+        ngx.ctx.nginx_ui_request_reference = nil
+        return
+    end
     -- Owned block pages reserve an in-card slot, so the reference is visible
     -- without scrolling below a full-height upstream layout.
     local marker = "<!-- nginx-ui-request-reference -->"

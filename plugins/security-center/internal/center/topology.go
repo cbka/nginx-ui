@@ -115,7 +115,14 @@ func (s *Service) checkTopology(dump []byte, additionalSites ...string) error {
 			return invalid
 		}
 		for _, d := range block.GetDirectives() {
-			if sensitiveDirective(d.GetName()) && (!inServer || target) {
+			// The runtime's correlation directive only labels the transaction; it
+			// does not enable inspection or install rules. Accept solely the
+			// server-generated ID, never a client header or custom expression.
+			params := d.GetParameters()
+			requestReference := d.GetName() == "modsecurity_transaction_id" &&
+				len(params) == 1 && d.GetBlock() == nil &&
+				(params[0].Value == "$request_id" || params[0].Value == "'$request_id'" || params[0].Value == `"$request_id"`)
+			if sensitiveDirective(d.GetName()) && !requestReference && (!inServer || target) {
 				return conflict
 			}
 			if d.GetName() == "include" {
