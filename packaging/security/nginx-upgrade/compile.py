@@ -3,8 +3,8 @@
 import glob, os, pathlib, shlex, subprocess
 root = pathlib.Path('/out')
 src = root / 'sources'
-subprocess.run(['tar', '-xzf', str(root / 'nginx-1.30.6.tar.gz'), '-C', str(src)], check=True)
-nginx = src / 'nginx-1.30.6'
+subprocess.run(['tar', '-xzf', str(root / 'nginx-1.30.7.tar.gz'), '-C', str(src)], check=True)
+nginx = src / 'nginx-1.30.7'
 old = subprocess.run(['nginx', '-V'], capture_output=True, text=True, check=True).stderr
 args = shlex.split(old.split('configure arguments: ', 1)[1])
 args = [a.replace('-Wdate-time', '-Wno-date-time') for a in args if not a.startswith('--add-')]
@@ -27,7 +27,7 @@ for module in (nginx/'objs').glob('*.so'):
 old_names = {p.name for p in pathlib.Path('/usr/lib/nginx/modules').glob('*.so')}
 new_names = {p.name for p in output.glob('*.so')}
 assert old_names == new_names, (old_names-new_names, new_names-old_names)
-print('NGINX 1.30.6: complete module parity', len(new_names))
+print('NGINX 1.30.7: complete module parity', len(new_names))
 
 import shutil
 perl = nginx / 'objs/src/http/modules/perl/blib'

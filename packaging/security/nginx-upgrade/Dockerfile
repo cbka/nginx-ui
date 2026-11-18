@@ -3,7 +3,7 @@
 ARG RUNTIME_BASE
 FROM ${RUNTIME_BASE}
 COPY output/ /tmp/nginx130/
-COPY nginx.sha256 sources.sha256 module-sources.lock /usr/local/share/nginx-ui-security/nginx-1.30.6/
+COPY nginx.sha256 sources.sha256 module-sources.lock /usr/local/share/nginx-ui-security/nginx-1.30.7/
 RUN set -eu; \
     mkdir -p /usr/local/share/nginx-ui-security/debian-original; \
     dpkg-divert --local --rename --add --divert /usr/local/share/nginx-ui-security/debian-original/nginx /usr/sbin/nginx; \
@@ -20,8 +20,8 @@ RUN set -eu; \
     done; \
     cp /tmp/nginx130/perl-lib/nginx.pm /usr/lib/x86_64-linux-gnu/perl5/5.40/nginx.pm; \
     cp /tmp/nginx130/perl-auto/nginx/nginx.so /usr/lib/x86_64-linux-gnu/perl5/5.40/auto/nginx/nginx.so; \
-    nginx -v 2>&1 | grep -Fx 'nginx version: nginx/1.30.6'; \
+    nginx -v 2>&1 | grep -Fx 'nginx version: nginx/1.30.7'; \
     nginx -t; \
-    sha256sum /usr/sbin/nginx /usr/lib/nginx/modules/*.so > /usr/local/share/nginx-ui-security/nginx-1.30.6/runtime.sha256; \
+    sha256sum /usr/sbin/nginx /usr/lib/nginx/modules/*.so > /usr/local/share/nginx-ui-security/nginx-1.30.7/runtime.sha256; \
     rm -rf /tmp/nginx130
-LABEL org.nginx-ui.security.nginx.version="1.30.6"
+LABEL org.nginx-ui.security.nginx.version="1.30.7"
