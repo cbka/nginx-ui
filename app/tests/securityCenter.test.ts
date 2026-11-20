@@ -93,6 +93,7 @@ describe('website policy inheritance', () => {
     expect(policy).toEqual({
       modsecurity: 'inherit',
       crowdsec: 'inherit',
+      appsec: 'inherit',
       paranoia_level: null,
       inbound_threshold: null,
       outbound_threshold: null,
@@ -217,7 +218,11 @@ describe('IP allowlist policy drafts', () => {
     expect(validSitePolicy(defaults)).toBe(true)
   })
   test('template edits cannot mutate saved allowlists and removals appear in comparison', () => {
-    const saved = { ...inheritedSitePolicy(), modsecurity_allowlist: ['192.0.2.1'], crowdsec_allowlist: ['2001:db8::/64'] }
+    const saved = {
+      ...inheritedSitePolicy(),
+      modsecurity_allowlist: ['192.0.2.1'],
+      crowdsec_allowlist: ['2001:db8::/64'],
+    }
     const draft = cloneSitePolicy(saved)
     draft.modsecurity_allowlist!.push('192.0.2.0/24')
     draft.crowdsec_allowlist!.splice(0)
@@ -227,9 +232,12 @@ describe('IP allowlist policy drafts', () => {
   })
   test('draft validation bounds lists and rejects config text before server network validation', () => {
     expect(validAllowlistDraft(['192.0.2.10', '192.0.2.0/24', '2001:db8::/64'])).toBe(true)
-    expect(validAllowlistDraft(Array.from({ length: 401 }, () => '192.0.2.1'))).toBe(false)
+    expect(validAllowlistDraft(Array.from({ length: 401 }).fill('192.0.2.1'))).toBe(false)
     expect(validAllowlistDraft(['192.0.2.1; allow all'])).toBe(false)
-    expect(validTemplatePolicy({ ...inheritedSitePolicy(), crowdsec_allowlist: ['example.com'] })).toBe(false)
+    expect(validTemplatePolicy({
+      ...inheritedSitePolicy(),
+      crowdsec_allowlist: ['example.com'],
+    })).toBe(false)
   })
 })
 

@@ -7,9 +7,9 @@ import gettext from '@/gettext'
 import { getErrorMessage } from '@/lib/http'
 import { usePluginLoader } from '@/plugin'
 import { enableReplacesText } from './conflicts'
-import { requiresDisableConfirmation } from './lifecycle'
 import InstalledPluginCard from './InstalledPluginCard.vue'
 import { usePluginInventory } from './inventory'
+import { requiresDisableConfirmation } from './lifecycle'
 import PermissionApprovalModal from './PermissionApprovalModal.vue'
 import PluginDrawer from './PluginDrawer.vue'
 import { matchesFilter, matchesKeyword, needsAttention } from './presets'
@@ -214,11 +214,15 @@ async function requestDisable(plugin: PluginInfo) {
       style: { display: 'flex', flexDirection: 'column', gap: '8px' },
     }, [
       ...(plugin.permissions.includes('lifecycle.deactivate')
-        ? [h('p', secondary, $gettext('Disables this plugin and its managed functions on this node. This confirms deactivation on this node only; check other nodes separately when stopping protection across the cluster.'))]
+        ? [
+            h('p', secondary, $gettext('Disables this plugin and its managed functions on this node. This confirms deactivation on this node only; check other nodes separately when stopping protection across the cluster.')),
+          ]
         : []),
       ...(usage && usage.total > 0
         ? [
-            h('p', { style: { margin: 0 } }, certificateUsageText(usage.total)),
+            h('p', {
+              style: { margin: 0 },
+            }, certificateUsageText(usage.total)),
             h('p', secondary, formatUsagePreview(previewUsage(usage))),
             h('p', secondary, $gettext('Renewal resumes when you turn it back on.')),
           ]
