@@ -7,7 +7,7 @@
     },
     "app": {
       "name": "nginx-ui-app-next",
-      "version": "2.9.3",
+      "version": "3.0.0-security.20261120",
       "dependencies": {
         "@0xjacky/vue-github-button": "^3.1.1",
         "@antdv-next/icons": "^1.1.2",
