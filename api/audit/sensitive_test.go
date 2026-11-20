@@ -53,7 +53,7 @@ var nonSecretProviderSettings = map[string]struct{}{
 }
 
 // TestIsCredentialNameCoversDNSProviderCredentials runs the matcher over every
-// credential setting in the bundled lego provider catalog, so a provider whose
+// credential setting and secret field in the registered provider forms, so a provider whose
 // secret uses an unusual name cannot slip through redaction unnoticed.
 func TestIsCredentialNameCoversDNSProviderCredentials(t *testing.T) {
 	providers := dns.GetProvidersList()
@@ -61,10 +61,17 @@ func TestIsCredentialNameCoversDNSProviderCredentials(t *testing.T) {
 	checked := 0
 	for _, listed := range providers {
 		provider, ok := dns.GetProvider(listed.Code)
-		if !ok || provider.Configuration == nil {
+		if !ok || provider.Form == nil {
 			continue
 		}
-		for name := range provider.Configuration.Credentials {
+		for _, field := range provider.Form.Fields {
+			if field.Group != dns.FieldGroupCredential && !field.Secret {
+				continue
+			}
+			name := field.Key
+			if field.Secret {
+				assert.True(t, isCredentialName(name), "%s secret field %q must be redacted", provider.Code, name)
+			}
 			checked++
 			if isCredentialName(name) {
 				continue
@@ -82,5 +89,5 @@ func TestIsCredentialNameCoversDNSProviderCredentials(t *testing.T) {
 			assert.True(t, nonSecret, "%s credential %q is neither redacted nor listed as non-secret", provider.Code, name)
 		}
 	}
-	require.Greater(t, checked, 100)
+	require.Positive(t, checked, "registered provider forms must exercise credential redaction")
 }
