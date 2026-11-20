@@ -25,7 +25,7 @@ import (
 	cSettings "github.com/uozi-tech/cosy/settings"
 )
 
-const MaintenanceSuffix = "_nginx_ui_maintenance"
+const MaintenanceSuffix = model.MaintenanceConfigSuffix
 
 const (
 	maintenanceSiteHeaderKey           = "X-Maintenance-Site"
@@ -340,7 +340,13 @@ func createMaintenanceConfigWithPayload(conf *config.Config, baseDir string, sit
 		ngxServer := nginx.NewNgxServer()
 
 		// Preserve server identity and TLS handshake settings from the original site.
-		for _, directive := range extractMaintenanceServerDirectives(server, includeBaseDir) {
+		serverDirectives := extractMaintenanceServerDirectives(server, includeBaseDir)
+		for _, directive := range serverDirectives {
+			// Proxy inheritance belongs only to the retained ACME transport, not to
+			// the newly generated maintenance-page upstream (which can use different TLS).
+			if isMaintenanceACMEProxyDirective(directive.GetName()) {
+				continue
+			}
 			ngxDirective := &nginx.NgxDirective{
 				Directive: directive.GetName(),
 				Params:    strings.Join(extractParams(directive), " "),
@@ -349,7 +355,9 @@ func createMaintenanceConfigWithPayload(conf *config.Config, baseDir string, sit
 			ngxServer.Directives = append(ngxServer.Directives, ngxDirective)
 		}
 
-		// Add acme-challenge location
+		preservedACME := preserveMaintenanceACMELocations(server, ngxServer, serverDirectives, includeBaseDir)
+
+		// Add a local issuer fallback only when the site has no explicit challenge route.
 		acmeChallengeLocation := &nginx.NgxLocation{
 			Path: "^~ /.well-known/acme-challenge",
 		}
@@ -362,7 +370,9 @@ func createMaintenanceConfigWithPayload(conf *config.Config, baseDir string, sit
 		locationContent.WriteString(fmt.Sprintf("proxy_pass http://127.0.0.1:%s;\n", settings.CertSettings.HTTPChallengePort))
 		acmeChallengeLocation.Content = maintenanceACMEAccess(ngxServer) + locationContent.String()
 
-		ngxServer.Locations = append(ngxServer.Locations, acmeChallengeLocation)
+		if !preservedACME {
+			ngxServer.Locations = append(ngxServer.Locations, acmeChallengeLocation)
+		}
 
 		// Add maintenance mode location
 		location := &nginx.NgxLocation{
@@ -437,6 +447,55 @@ func createMaintenanceConfigWithPayload(conf *config.Config, baseDir string, sit
 	}
 
 	return content
+}
+
+func isMaintenanceACMEProxyDirective(name string) bool {
+	return strings.HasPrefix(name, "proxy_ssl_") || name == "proxy_set_header" || name == "resolver" || name == "resolver_timeout"
+}
+
+// preserveMaintenanceACMELocations retains the site's explicit challenge transport,
+// which may forward to a cluster issuer rather than this node's local issuer port.
+// Copy the complete block: TLS, Host, rewrite and include settings are part of that route.
+// Only dedicated prefix or canonical legacy regex locations qualify; arbitrary matches could
+// expose application routes while the site is in maintenance.
+func preserveMaintenanceACMELocations(server config.IDirective, target *nginx.NgxServer, inherited []config.IDirective, baseDir string) bool {
+	preserved := false
+	for _, directive := range extractDirectives(server, "location") {
+		params := extractParams(directive)
+		// Older Nginx UI generated the canonical challenge route as a regex.
+		// Accept only that exact literal path below, never arbitrary regex patterns.
+		if len(params) == 2 && (params[0] == "^~" || params[0] == "~" || params[0] == "~*") {
+			params = params[1:]
+		}
+		if len(params) != 1 || (params[0] != "/.well-known/acme-challenge" && params[0] != "/.well-known/acme-challenge/") {
+			continue
+		}
+		if directive.GetBlock() == nil {
+			continue
+		}
+		var content strings.Builder
+		content.WriteString(maintenanceACMEAccess(target))
+		// Nginx inherits each directive (and repeated header/conf-command group)
+		// only when the location defines none of that name, including via includes.
+		local := make(map[string]bool)
+		for _, child := range extractMaintenanceServerDirectives(directive, baseDir) {
+			local[child.GetName()] = true
+		}
+		for _, parent := range inherited {
+			if isMaintenanceACMEProxyDirective(parent.GetName()) && !local[parent.GetName()] {
+				content.WriteString(dumpMaintenanceDirective(parent))
+				content.WriteString("\n")
+			}
+		}
+		for _, child := range directive.GetBlock().GetDirectives() {
+			content.WriteString(dumpMaintenanceDirective(child))
+			content.WriteString("\n")
+		}
+		// The maintenance regex catch-all must never override a plain ACME prefix.
+		target.Locations = append(target.Locations, &nginx.NgxLocation{Path: "^~ " + params[0], Content: content.String()})
+		preserved = true
+	}
+	return preserved
 }
 
 func createBypassMaintenanceConfig(conf *config.Config, siteName string, payload MaintenancePayload, bypassIP, pageProxyPass, metaProxyPass string) (string, bool) {
@@ -641,6 +700,12 @@ func (e *maintenanceIncludeExpander) extractServerDirective(directive config.IDi
 	name := directive.GetName()
 
 	if _, ok := baseMaintenanceServerDirectives[name]; ok {
+		return []config.IDirective{directive}
+	}
+
+	// Preserve non-routing proxy inheritance used by retained ACME locations.
+	// In particular dropping proxy_ssl_verify silently disables upstream verification.
+	if isMaintenanceACMEProxyDirective(name) {
 		return []config.IDirective{directive}
 	}
 
@@ -867,6 +932,12 @@ func (e *maintenanceIncludeExpander) extractIncludeFile(path string, depth int) 
 
 func (e *maintenanceIncludeExpander) extractIncludedDirective(directive config.IDirective, baseDir string, depth int) []config.IDirective {
 	name := directive.GetName()
+
+	// Preserve non-routing proxy inheritance used by retained ACME locations.
+	// In particular dropping proxy_ssl_verify silently disables upstream verification.
+	if strings.HasPrefix(name, "proxy_ssl_") || name == "proxy_set_header" || name == "resolver" || name == "resolver_timeout" {
+		return []config.IDirective{directive}
+	}
 
 	if strings.HasPrefix(name, "ssl_") {
 		return []config.IDirective{directive}

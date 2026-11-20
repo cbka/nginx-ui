@@ -1297,3 +1297,129 @@ func TestCreateMaintenanceConfig_PublicSiteHasNoAccessException(t *testing.T) {
 		t.Fatalf("public site got an access exception:\n%s", content)
 	}
 }
+
+func TestMaintenancePreservesACMERoute(t *testing.T) {
+	setupMaintenanceTestSettings(t, "")
+	settings.CertSettings.HTTPChallengePort = "9181"
+	for _, route := range []string{
+		`location ^~ /.well-known/acme-challenge { proxy_pass http://127.0.0.1:9180; }`,
+		`location ~ /.well-known/acme-challenge { proxy_set_header Host $host; proxy_pass http://127.0.0.1:9180; }`,
+		`location ~* /.well-known/acme-challenge { proxy_pass http://127.0.0.1:9180; }`,
+		`location /.well-known/acme-challenge/ { proxy_set_header Host issuer.example; proxy_ssl_server_name on; proxy_ssl_name issuer.example; proxy_pass https://issuer.example:9443; }`,
+	} {
+		conf, err := parser.NewStringParser(`server { listen 80; server_name example.com; `+route+` location / { proxy_pass http://application; } }`, parser.WithSkipValidDirectivesErr()).Parse()
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := createMaintenanceConfig(conf, "", "example.com")
+		if strings.Contains(content, "127.0.0.1:9181") || strings.Contains(content, "http://application") {
+			t.Fatalf("route replaced or backend exposed: %s", content)
+		}
+		for _, expected := range []string{"proxy_pass", strings.Split(strings.Split(route, "proxy_pass ")[1], ";")[0]} {
+			if !strings.Contains(content, expected) {
+				t.Fatalf("missing %s: %s", expected, content)
+			}
+		}
+		if !strings.Contains(content, "location ^~ /.well-known/acme-challenge") {
+			t.Fatal("maintenance regex would shadow plain ACME prefix")
+		}
+		if strings.Contains(route, "proxy_ssl_name") && (!strings.Contains(content, "proxy_ssl_name issuer.example;") || !strings.Contains(content, "proxy_set_header Host issuer.example;")) {
+			t.Fatal("custom challenge options lost")
+		}
+	}
+}
+func TestMaintenanceACMEFallbackRejectsUnrelatedLocation(t *testing.T) {
+	setupMaintenanceTestSettings(t, "")
+	settings.CertSettings.HTTPChallengePort = "9181"
+	conf, err := parser.NewStringParser(`server { listen 80; location /foo/.well-known/acme-challenge { proxy_pass http://application; } }`, parser.WithSkipValidDirectivesErr()).Parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := createMaintenanceConfig(conf, "", "example.com")
+	if !strings.Contains(content, "proxy_pass http://127.0.0.1:9181;") || strings.Contains(content, "http://application") {
+		t.Fatalf("unexpected fallback: %s", content)
+	}
+}
+
+func TestMaintenanceBypassKeepsACMERelay(t *testing.T) {
+	setupMaintenanceTestSettings(t, "")
+	settings.CertSettings.HTTPChallengePort = "9181"
+	settings.NginxSettings.MaintenanceBypassIP = "203.0.113.10"
+	conf, err := parser.NewStringParser(`server { listen 80; location ^~ /.well-known/acme-challenge { proxy_pass http://127.0.0.1:9180; } location / { proxy_pass http://application; } }`, parser.WithSkipValidDirectivesErr()).Parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := createMaintenanceConfig(conf, "", "example.com")
+	if !strings.Contains(content, "http://127.0.0.1:9180") || strings.Contains(content, "http://127.0.0.1:9181") || !strings.Contains(content, "return 418;") {
+		t.Fatalf("bypass route changed: %s", content)
+	}
+}
+
+func TestMaintenanceACMEPreservesServerTLSInheritance(t *testing.T) {
+	setupMaintenanceTestSettings(t, "")
+	conf, err := parser.NewStringParser(`server {
+ listen 80;
+ proxy_ssl_verify on;
+ proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;
+ proxy_ssl_server_name on;
+ proxy_ssl_name issuer.example;
+ proxy_set_header Host issuer.example;
+ resolver 192.0.2.53;
+ resolver_timeout 5s;
+ location /.well-known/acme-challenge/ { proxy_pass https://issuer.example:9443; }
+ location / { proxy_pass http://application; }
+ }`, parser.WithSkipValidDirectivesErr()).Parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := createMaintenanceConfig(conf, "", "example.com")
+	parsed, parseErr := parser.NewStringParser(content, parser.WithSkipValidDirectivesErr()).Parse()
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+	for _, server := range findServerBlocks(parsed.Block) {
+		for _, directive := range server.GetBlock().GetDirectives() {
+			if isMaintenanceACMEProxyDirective(directive.GetName()) {
+				t.Fatal("ACME TLS inheritance leaked to maintenance upstream")
+			}
+		}
+	}
+	for _, expected := range []string{"proxy_ssl_verify on;", "proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;", "proxy_ssl_server_name on;", "proxy_ssl_name issuer.example;", "proxy_set_header Host issuer.example;", "resolver 192.0.2.53;", "resolver_timeout 5s;"} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("lost inherited directive %s: %s", expected, content)
+		}
+	}
+	if strings.Contains(content, "http://application") {
+		t.Fatal("application route exposed")
+	}
+}
+
+func TestMaintenanceACMELocalOverridesInheritedGroup(t *testing.T) {
+	setupMaintenanceTestSettings(t, "")
+	conf, err := parser.NewStringParser(`server {
+ listen 80;
+ proxy_set_header Host parent.example;
+ proxy_set_header X-Parent inherited;
+ proxy_ssl_name parent.example;
+ proxy_ssl_verify on;
+ location ~ /.well-known/acme-challenge {
+ proxy_set_header Host child.example;
+ proxy_ssl_name child.example;
+ proxy_pass https://issuer.example;
+ }
+ }`, parser.WithSkipValidDirectivesErr()).Parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := createMaintenanceConfig(conf, "", "example.com")
+	for _, unwanted := range []string{"parent.example", "X-Parent"} {
+		if strings.Contains(content, unwanted) {
+			t.Fatalf("incorrect inherited group %s: %s", unwanted, content)
+		}
+	}
+	for _, want := range []string{"proxy_set_header Host child.example;", "proxy_ssl_name child.example;", "proxy_ssl_verify on;"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("missing effective setting %s: %s", want, content)
+		}
+	}
+}

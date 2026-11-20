@@ -30,6 +30,9 @@ const (
 // configuration was disabled; enabling the configuration resumes it.
 const AutoCertPaused = -2
 
+// MaintenanceConfigSuffix identifies the enabled HTTP maintenance configuration.
+const MaintenanceConfigSuffix = "_nginx_ui_maintenance"
+
 type CertDomains []string
 
 type CertificateResource struct {
@@ -155,7 +158,7 @@ func GetAutoCertList() (c []*Cert) {
 	}
 
 	for _, v := range t {
-		if v.ChallengeMethod == CertChallengeMethodDNS01 || enabledConfigMap[v.Filename] == true {
+		if v.ChallengeMethod == CertChallengeMethodDNS01 || enabledConfigMap[v.Filename] || enabledConfigMap[v.Filename+MaintenanceConfigSuffix] {
 			c = append(c, v)
 		}
 	}
