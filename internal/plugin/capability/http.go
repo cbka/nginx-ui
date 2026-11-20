@@ -180,7 +180,7 @@ func serveHTTPUnix(c *gin.Context, h HTTPHost, id, subPath string) {
 			req.URL.Path = subPath
 			req.URL.RawPath = ""
 			if upgrade {
-				stripHandshakeCredentials(req.URL)
+				req.URL.RawQuery = stripHandshakeCredentials(req.URL.RawQuery)
 			}
 			stripSecureSessionQuery(req.URL)
 			// Credentials and any copy of the headers below the client sent
@@ -197,14 +197,15 @@ func serveHTTPUnix(c *gin.Context, h HTTPHost, id, subPath string) {
 	proxy.ServeHTTP(c.Writer, c.Request)
 }
 
-// stripHandshakeCredentials removes the query parameters a browser WebSocket
-// uses to authenticate with the host, so the plugin never sees a session token
-// or secure session.
-func stripHandshakeCredentials(u *url.URL) {
-	values := u.Query()
-	middleware.StripCallerCredentialQuery(values)
+// stripHandshakeCredentials removes from the query of a WebSocket upgrade the
+// parameters a browser WebSocket uses to authenticate with the host and to
+// select a node, so the plugin never sees a session token or secure session.
+// The query of a plain request belongs to the plugin and is not touched.
+func stripHandshakeCredentials(rawQuery string) string {
+	values, _ := url.ParseQuery(rawQuery)
+	middleware.StripCallerCredentialQuery(values, true)
 	values.Del("x_node_id")
-	u.RawQuery = values.Encode()
+	return values.Encode()
 }
 
 // dialerFor resolves how to reach the plugin's http capability: a unix socket
@@ -260,10 +261,14 @@ func serveHTTPRPC(c *gin.Context, h HTTPHost, id, subPath string) {
 
 	cleanURL := *c.Request.URL
 	stripSecureSessionQuery(&cleanURL)
+	query := cleanURL.RawQuery
+	if middleware.IsWebSocketUpgrade(c.Request) {
+		query = stripHandshakeCredentials(query)
+	}
 	params := protocol.HTTPHandleParams{
 		Method:     c.Request.Method,
 		Path:       subPath,
-		Query:      cleanURL.RawQuery,
+		Query:      query,
 		Headers:    sanitizedHeaders(c.Request.Header),
 		BodyBase64: base64.StdEncoding.EncodeToString(body),
 		User:       currentUser(c),
