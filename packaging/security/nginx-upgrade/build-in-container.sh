@@ -14,6 +14,6 @@ xargs apt-get source --download-only < ../module-sources.lock
 sha256sum -c ../sources.sha256
 for file in *.dsc; do dpkg-source -x "$file"; done
 cd /out
-curl -fsSL https://nginx.org/download/nginx-1.30.7.tar.gz -o nginx-1.30.7.tar.gz
+curl -fsSL https://nginx.org/download/nginx-1.30.8.tar.gz -o nginx-1.30.8.tar.gz
 sha256sum -c nginx.sha256
 python3 /out/compile.py

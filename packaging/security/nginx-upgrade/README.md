@@ -1,12 +1,12 @@
-# NGINX 1.30.7 runtime upgrade
+# NGINX 1.30.8 runtime upgrade
 
 Build against the immutable existing production runtime, retaining the host,
 CrowdSec bouncer, CRS, libraries and all 29 dynamic-module names/config paths.
 This is an upstream source build, **not** a Debian NGINX package version bump.
 
 ```sh
-RUNTIME_BASE='codex/nginx-ui-security@sha256:38590286c4e62cfef50b8e607a6dc6455215e46520479ad3b03026971300836c' \
-NGINX_IMAGE='codex/nginx-ui-security:nginx-1.30.7' \
+RUNTIME_BASE='codex/nginx-ui-security@sha256:590300fd5dd1192bb63a4804c4a8045fbe4bff6fd82180c11e1c32088d07c18a' \
+NGINX_IMAGE='codex/nginx-ui-security:nginx-1.30.8' \
 ./packaging/security/nginx-upgrade/build.sh
 ```
 
@@ -25,7 +25,7 @@ D6786CE303D9A9022998DC6CC8464D549AF75C0A (Sergey Kandaurov).
 All modules and the embedded Perl bridge are rebuilt with the NGINX binary.
 The prior binary/module files are registered as local dpkg diversions. Debian
 package metadata still describes the retained original packages; use `nginx -v`
-and `/usr/local/share/nginx-ui-security/nginx-1.30.7/` for the actual runtime
+and `/usr/local/share/nginx-ui-security/nginx-1.30.8/` for the actual runtime
 version and checksums. Do not upgrade NGINX with apt inside a running container.
 Future updates must rebuild this image and test module parity. Runtime Debian
 libraries and application packages continue to be recorded in packages.lock.
